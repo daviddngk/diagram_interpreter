@@ -1,0 +1,39 @@
+# ─── Python Backend ─────────────────────────────────────────
+# Byte-compiled / optimized / DLL files
+backend/routes/__pycache__/
+backend/services/__pycache__/
+backend/*.py[cod]
+backend/*.so
+
+# Virtualenv
+backend/venv/
+backend/.env             # if you keep a dotenv file there
+
+# Distribution / packaging
+backend/build/
+backend/dist/
+backend/*.egg-info/
+
+# ─── React UI (JavaScript) ──────────────────────────────────
+# Dependencies
+node_modules/
+
+# Build outputs
+src/build/
+src/.env.local           # create-react-app local env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── System / Editor ─────────────────────────────────────────
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
