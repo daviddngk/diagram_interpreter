@@ -1,63 +1,80 @@
-# File: backend/services/o4_analyze.py
+# backend/services/o4_analyze.py
 import os
-import base64
-import json
-from flask import jsonify
+from flask import jsonify, request
 import openai
 
-# Initialize API key
+# Make sure your key is loaded before this (via dotenv or env var)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def analyze_diagram(req):
-    """
-    Read an uploaded image from the Flask request, send it to o4-mini for
-    node/edge extraction, and return a JSON response.
-    """
-    # 1. Get the image file
+    # 1. Grab the uploaded file from the POST
     image_file = req.files.get("image")
-    if image_file is None:
+    if not image_file:
         return jsonify({"error": "No image provided"}), 400
-    img_bytes = image_file.read()
 
-    # 2. Encode as Data URI with correct MIME type
-    mime = image_file.mimetype  # e.g. "image/png" or "image/jpeg"
-    b64 = base64.b64encode(img_bytes).decode("utf-8")
-    data_uri = f"data:{mime};base64,{b64}"
+    # --- Important Check: Ensure the file is actually saved ---
+    # The current code assumes the file exists at the URL *before* calling the API.
+    # You need to make sure your Flask route *saves* the uploaded file
+    # to the location accessible by https://dngk.ca/diags/ *before* this point.
+    # If it's not saved yet, the URL will lead to a 404, and the model won't find it.
+    # Example (you'll need to adapt path/permissions):
+    # save_path = os.path.join("/path/to/your/web/server/diags", image_file.filename)
+    # try:
+    #     image_file.save(save_path)
+    # except Exception as e:
+    #     print(f"Error saving file: {e}") # Add proper logging
+    #     return jsonify({"error": "Failed to save image for analysis"}), 500
+    # ---------------------------------------------------------
 
-    # 3. Build prompt messages
+
+    # 2. Use the filename to build your public URL
+    filename = image_file.filename
+    image_url = f"https://dngk.ca/diags/{filename}"
+
+    # 3. Build your chat prompt (Corrected for Image Input)
     system_msg = {
         "role": "system",
-        "content": (
-            "You are a telecom diagram parser. "
-            "Extract all equipment items as nodes and connections as edges."
-        )
+        "content": "You are a helpful assistant that describes diagrams."
     }
     user_msg = {
         "role": "user",
-        "content": (
-            "Analyze this diagram image and return a JSON object with:\n"
-            "- nodes: an array of { id, type, label, bbox }\n"
-            "- edges: an array of { from, to, label }\n\n"
-            + data_uri
-        )
+        "content": [ # <-- Content is now a LIST
+            {"type": "text", "text": "Describe the diagram at this URL:"},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_url, # <-- Pass the URL specifically for the image
+                    # Optional: You can add "detail": "low" | "high" | "auto" here
+                    # "detail": "auto" is the default
+                },
+            },
+        ]
     }
 
-    # 4. Call o4-mini using the updated OpenAI Python library interface
-    resp = openai.chat.completions.create(
-        model="o4-mini",
-        messages=[system_msg, user_msg],
-        temperature=1
-    )
-
-    # 5. Parse the response
-    content = resp.choices[0].message.content
+    # 4. Call GPT-4o-Mini (now correctly using vision capability)
     try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        return jsonify({
-            "error": "Invalid JSON from model",
-            "raw": content
-        }), 500
+        resp = openai.chat.completions.create(
+            model="gpt-4o-mini", # This model supports vision
+            messages=[system_msg, user_msg],
+            # Optional: Add max_tokens if needed
+            # max_tokens=1000
+        )
 
-    # 6. Return structured JSON
-    return jsonify(parsed)
+        # 5. Return what the model says
+        description = resp.choices[0].message.content
+        return jsonify({"description": description, "url": image_url})
+
+    except openai.BadRequestError as e:
+        # Handle potential errors like invalid URL, inaccessible image, etc.
+        print(f"OpenAI API Error: {e}") # Add proper logging
+        error_message = f"Could not analyze the image. The API reported an error: {e}"
+        # Check if the error message indicates the image couldn't be accessed
+        if "Could not retrieve image" in str(e) or "Failed to download image" in str(e):
+             error_message = f"Could not analyze the image. The model failed to access the image at the provided URL: {image_url}. Please ensure the URL is correct and publicly accessible."
+
+        return jsonify({"error": error_message}), 400
+    except Exception as e:
+        # Handle other potential exceptions
+        print(f"An unexpected error occurred: {e}") # Add proper logging
+        return jsonify({"error": "An unexpected error occurred during analysis."}), 500
+

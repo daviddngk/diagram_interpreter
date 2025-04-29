@@ -1,4 +1,5 @@
-# File: backend/services_api.py
+from dotenv import load_dotenv
+load_dotenv()   # <-- this reads .env into os.environ
 from flask import Flask, request
 from flask_cors import CORS
 

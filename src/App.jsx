@@ -3,15 +3,16 @@ import axios from "axios";
 
 export default function App() {
   const [imageSrc, setImageSrc] = useState(null);
-  const [result, setResult] = useState(null);
+  const [description, setDescription] = useState("");
+  const [errorInfo, setErrorInfo] = useState(null);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const objectUrl = URL.createObjectURL(file);
     setImageSrc(objectUrl);
-    setResult(null);
+    setDescription("");
+    setErrorInfo(null);
   };
 
   const analyzeDiagram = async () => {
@@ -24,15 +25,16 @@ export default function App() {
     form.append("image", file);
 
     try {
-      const res = await axios.post(
-        "http://localhost:5000/analyze",
-        form,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      );
-      setResult(res.data);
+      const res = await axios.post("http://localhost:5000/analyze", form);
+      setDescription(res.data.description || "");
     } catch (err) {
       console.error("Analysis error:", err);
-      alert("Failed to analyze diagram. Please check the server logs.");
+      if (err.response && err.response.data) {
+        setErrorInfo(err.response.data);
+      } else {
+        setErrorInfo({ message: err.message });
+      }
+      setDescription("");
     }
   };
 
@@ -58,15 +60,24 @@ export default function App() {
           onClick={analyzeDiagram}
           className="px-5 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
         >
-          Analyze Diagram
+          Describe Diagram
         </button>
       )}
 
-      {result && (
+      {description && (
         <div className="mt-6 bg-gray-100 p-4 rounded">
-          <h2 className="text-xl font-semibold mb-2">Analysis Result</h2>
-          <pre className="overflow-x-auto text-sm">
-            {JSON.stringify(result, null, 2)}
+          <h2 className="text-xl font-semibold mb-2">Diagram Description</h2>
+          <p className="whitespace-pre-wrap text-sm">
+            {description}
+          </p>
+        </div>
+      )}
+
+      {errorInfo && (
+        <div className="mt-6 bg-red-100 p-4 rounded">
+          <h2 className="text-xl font-semibold mb-2 text-red-700">Error</h2>
+          <pre className="overflow-x-auto text-sm text-red-800">
+            {JSON.stringify(errorInfo, null, 2)}
           </pre>
         </div>
       )}
