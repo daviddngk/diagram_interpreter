@@ -5,7 +5,8 @@ export default function AnalysisPanel({ imageUrl }) {
   // Define the tools you want to display
   const tools = [
     { title: 'OCR Results', toolId: 'ocr' },
-    { title: 'Node Detection', toolId: 'nodes' },
+    { title: 'Node Detection (LLM)', toolId: 'nodes' },
+    { title: 'Edge Detection (LLM)', toolId: 'edges' }
     // Add more tools here as needed
     // { title: 'Relationship Analysis', toolId: 'relationships' },
   ];

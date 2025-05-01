@@ -5,6 +5,8 @@ import axios from 'axios';
 const API_BASE_URL = "http://localhost:5000";
 
 export default function AnalysisToolCard({ title, toolId, imageUrl }) {
+// Added this log to see the props when the component renders
+  console.log(`Rendering AnalysisToolCard: title="${title}", toolId="${toolId}"`)
   const [isOpen, setIsOpen] = useState(false); // Collapsed by default
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);
