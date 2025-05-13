@@ -218,11 +218,11 @@ export default function App() {
         />
 
         {imagePreviewSrc && (
-          <div className="mb-4 border rounded-lg p-2 bg-white shadow-sm max-w-xl mx-auto">
+          <div className="mb-4 border rounded-lg p-2 bg-white shadow-sm"> 
             <img
               src={imagePreviewSrc}
               alt="Preview"
-              className="max-h-96 w-auto mx-auto"
+              className="max-h-[70vh] w-auto mx-auto" 
             />
           </div>
         )}

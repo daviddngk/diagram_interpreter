@@ -15,6 +15,7 @@ import json # For potentially parsing LLM response if needed
 
 # Import your service functions
 from services.ocr_engine import extract_text_blocks
+from services.edge_detector_fewshot_llm import detect_edges_fewshot # Import the new service
 # Note: analyze_diagram_from_url is defined locally in this file now
 # from services.node_detector_yolo import detect_equipment_nodes # No longer using YOLO for this endpoint
 
@@ -57,11 +58,31 @@ cors = CORS(app, resources={
     r"/analyze": {"origins": "http://localhost:3000"},
     r"/analyze/ocr": {"origins": "http://localhost:3000"}, # Added OCR route
     r"/analyze/nodes": {"origins": "http://localhost:3000"}, # Add Node Detection route
-    r"/analyze/edges": {"origins": "http://localhost:3000"}  # Add Edge Detection route
+    r"/analyze/edges": {"origins": "http://localhost:3000"},  # Add Edge Detection route
+    r"/analyze/edges-fewshot": {"origins": "http://localhost:3000"} # Add Few-Shot Edge Detection route
 })
 # Note: For production, you would replace or add your deployed frontend URL.
 # Example: {"origins": ["http://localhost:3000", "https://your-deployed-app.com"]}
 # ---------------------------------
+
+# --- Global variable to hold pre-loaded reference text ---
+REFERENCE_MARKDOWN_CONTENT = None
+REFERENCE_FILE_PATH = os.path.join(os.path.dirname(__file__), 'reference_material', 'site_reference.md') # Updated path
+
+def load_reference_material():
+    """Loads the reference markdown file into the global variable."""
+    global REFERENCE_MARKDOWN_CONTENT
+    try:
+        if os.path.exists(REFERENCE_FILE_PATH):
+            with open(REFERENCE_FILE_PATH, 'r', encoding='utf-8') as f:
+                REFERENCE_MARKDOWN_CONTENT = f.read()
+            print(f"Successfully loaded reference material from: {REFERENCE_FILE_PATH}")
+        else:
+            print(f"Warning: Reference material file not found at {REFERENCE_FILE_PATH}. Few-shot endpoint will lack context.")
+            REFERENCE_MARKDOWN_CONTENT = "" # Set to empty string if not found
+    except Exception as e:
+        print(f"Error loading reference material: {e}")
+        REFERENCE_MARKDOWN_CONTENT = "" # Set to empty string on error
 
 # --- Route: Generate GCS Signed URL ---
 @app.route("/generate-upload-url", methods=["POST"])
@@ -247,7 +268,8 @@ def handle_node_detection_llm(): # Renamed function for clarity
         user_msg = {
             "role": "user",
             "content": [
-                {"type": "text", "text": "Identify the equipment nodes in the diagram at this URL and provide the output in the specified JSON format:"},
+                #{"type": "text", "text": "Identify the equipment nodes in the diagram at this URL and provide the output in the specified JSON format:"},
+                {"type": "text", "text": "The diagram is provided via a url. Identify the equipment nodes in the diagram. Provide the output in the specified JSON format:"},
                 {
                     "type": "image_url",
                     "image_url": {"url": image_url},
@@ -365,6 +387,69 @@ def handle_edge_detection_llm():
         traceback.print_exc()
         return jsonify({"error": "An unexpected error occurred during Edge Detection analysis."}), 500
 
+# --- Route: Edge Detection Analysis (Few Shot LLM) ---
+@app.route('/analyze/edges-fewshot', methods=['POST'])
+def handle_edge_detection_fewshot_llm():
+    # --- Pre-checks (API Key, Reference Content Loading) ---
+    if not openai.api_key:
+         return jsonify({"error": "OpenAI API key not configured on server."}), 500
+    if REFERENCE_MARKDOWN_CONTENT is None: # Check if loading failed or hasn't happened
+        print("Warning: Reference content not loaded. Attempting to load now.")
+        load_reference_material() # Attempt to load if not already loaded
+        if REFERENCE_MARKDOWN_CONTENT is None: # Check again after attempting load
+             return jsonify({"error": "Failed to load reference material for few-shot analysis."}), 500
+
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing JSON request body"}), 400
+
+    image_url = data.get('image_url')
+    if not image_url:
+        return jsonify({"error": "Missing 'image_url' in request body"}), 400
+
+    try:
+        # ** TOKEN MANAGEMENT - CRITICAL **
+        # Simple Truncation: Limit the reference text length.
+        # This is a basic approach; more sophisticated methods (chunking, RAG) are better for large docs.
+        # Adjust MAX_REF_LENGTH based on model limits and typical prompt size.
+        MAX_REF_LENGTH = 8000 # Example: Limit reference text to ~8k characters
+        truncated_reference = (REFERENCE_MARKDOWN_CONTENT[:MAX_REF_LENGTH] + '...') if len(REFERENCE_MARKDOWN_CONTENT) > MAX_REF_LENGTH else REFERENCE_MARKDOWN_CONTENT
+        if not truncated_reference and REFERENCE_MARKDOWN_CONTENT is not None: # Check if truncation resulted in empty but original wasn't None
+            print("Warning: No reference content available for few-shot prompt after potential truncation.")
+
+        # --- Call the dedicated service function ---
+        edge_results = detect_edges_fewshot(image_url, truncated_reference)
+
+        # The service function now returns parsed JSON or raises an exception
+        # If it returned an error dict, handle it (optional, depends on service design)
+        # if "error" in edge_results:
+        #    return jsonify(edge_results), 500 # Or appropriate status code
+
+        return jsonify(edge_results)
+
+    # --- Error Handling for Exceptions Raised by the Service ---
+    except json.JSONDecodeError as json_err:
+        # This might happen if the service tries to parse invalid JSON from LLM
+        print(f"Error decoding JSON returned by LLM (via service): {json_err}")
+        # Potentially log the raw response if the service could provide it
+        return jsonify({"error": "LLM did not return valid JSON for few-shot edge detection."}), 500
+    except openai.BadRequestError as e:
+        print(f"OpenAI API BadRequestError during Few-Shot Edge Detection: {e}")
+        # Add specific checks for token limits if possible from error message
+        if "context_length_exceeded" in str(e):
+             error_message = "The request failed because the combined diagram analysis prompt and reference material exceeded the model's token limit. Try reducing the reference material size."
+        else:
+            error_message = f"Could not perform few-shot edge detection via OpenAI. The API reported an error: {e}"
+            if "Could not retrieve image" in str(e) or "Failed to download image" in str(e):
+                 error_message = f"Could not perform few-shot edge detection. The model failed to access an image URL. Ensure all URLs (diagram and reference images) are valid and accessible."
+        return jsonify({"error": error_message}), 400
+    except Exception as e:
+        # Catch errors raised by the service function or other unexpected issues
+        print(f"An unexpected error occurred during LLM Few-Shot Edge Detection: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "An unexpected error occurred during Few-Shot Edge Detection analysis."}), 500
+
 
 if __name__ == "__main__":
     # Perform checks for essential environment variables on startup
@@ -383,6 +468,9 @@ if __name__ == "__main__":
          # exit(1)
     else:
         print("All required environment variables seem to be set.")
+
+    # Load reference material on startup
+    load_reference_material()
 
     print("Starting Flask server...")
     print("Available routes:")
