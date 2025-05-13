@@ -36,12 +36,16 @@ def detect_edges_fewshot(image_url: str, reference_context: str):
         system_msg = {
             "role": "system",
             "content": (
-                "You are an expert system analyzing engineering diagrams (like P&IDs or flowcharts). "
-                "Your task is to identify the connections (edges, lines, pipes, arrows) between the equipment nodes or components shown in the diagram. "
+                #"You are an expert system analyzing engineering diagrams (like P&IDs or flowcharts). "
+                "You are an expert system analyzing telecommunication site diagrams."
+                "Telecommunication Site Diagrams will typically include equipment including Routers, basebands, radio units (RUs) and Antennas"
+                "Information about some of these equipment items and their ports can be found in the reference_context document"
+                "The reference_context document has links to port map images which can be used to identify and locate individual ports for items of equipment"
+                "Your task is to identify the connections (edges, lines, pipes, arrows) between the ports of the equipment nodes shown in the diagram. "
                 "Use the provided reference material for context, examples, and conventions when identifying edges. The reference may include text, tables, and image descriptions/links. "
                 "Describe each connection by specifying the source and target nodes it connects. Use the labels of the nodes if identifiable, otherwise describe them. "
                 "Format the output as a JSON list of objects, where each object has an 'id' (sequential number starting from 1), a 'source' (description of the starting node/point), and a 'target' (description of the ending node/point)."
-                "Example Output: [{'id': 1, 'source': 'Pump P-101', 'target': 'Heat Exchanger E-203 Inlet'}, {'id': 2, 'source': 'Heat Exchanger E-203 Outlet', 'target': 'Storage Tank T-50'}]"
+                "Example Output: [{'id': 1, 'source': 'Baseband BB6648', 'target': 'Router R6630'}, {'id': 2, 'source': 'Baseband BB6648', 'target': 'Radio Unit RU6694'}]"
             )
         }
         user_msg = {
