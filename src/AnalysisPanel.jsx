@@ -1,90 +1,75 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import AnalysisToolCard from './AnalysisToolCard';
-import JsonEditor from './JsonEditor'; // Make sure you have created this file
+// JsonEditor is no longer invoked directly by AnalysisPanel for individual tools
 
-export default function AnalysisPanel({ imageUrl }) {
-  const [editingTool, setEditingTool] = useState(null); // Stores { toolId: string, title: string } when editing
-  const [analysisDataStore, setAnalysisDataStore] = useState({}); // Stores { [toolId]: jsonData }
-
-  // Define the tools. This could also be moved to a constants file if it grows.
+export default function AnalysisPanel({
+  imageUrl,
+  consolidatedData, // The entire DiagramIQ data object
+  onCaptureData, // Callback to capture a tool's output into consolidatedData
+  onRequestEditConsolidatedData, // Callback to signal App to show the main JsonEditor
+}) {
+  // Define the tools. This could also be moved to a constants file.
   const tools = [
     { title: 'OCR Results', toolId: 'ocr' },
     { title: 'Node Detection (LLM)', toolId: 'nodes' },
     { title: 'Edge Detection (LLM)', toolId: 'edges' },
-    { title: 'Edge Detection (Few Shot LLM)', toolId: 'edges-fewshot' }
-    // Add more tools here as needed
+    { title: 'Edge Detection (Few Shot LLM)', toolId: 'edges-fewshot' },
     // { title: 'Relationship Analysis', toolId: 'relationships' },
   ];
 
-  const handleEditRequest = useCallback((toolId, title) => {
-    if (analysisDataStore[toolId]) {
-      setEditingTool({ toolId, title });
-    } else {
-      // This case should ideally not happen if the edit button only appears when data exists.
-      console.warn(`No data available to edit for tool: ${toolId}. Please run the analysis first.`);
-      // Optionally, you could show a user-facing message here.
-    }
-  }, [analysisDataStore]);
+  // Individual tool editing state and handlers are removed as editing is now centralized.
+  // analysisDataStore is removed; data is either local to AnalysisToolCard (for latest run)
+  // or part of consolidatedData.
 
-  const handleSaveEdits = useCallback((updatedJson) => {
-    if (editingTool) {
-      setAnalysisDataStore(prevStore => ({
-        ...prevStore,
-        [editingTool.toolId]: updatedJson,
-      }));
-      // Note: Logging analysisDataStore immediately after setAnalysisDataStore might not show the updated state
-      // due to the asynchronous nature of setState. Use a useEffect to see the updated store if needed,
-      // or rely on the next render of AnalysisToolCard.
-      setEditingTool(null); // Close the editor
-    }
-   }, [editingTool]);
- 
-  const handleCancelEdits = useCallback(() => {
-    setEditingTool(null); // Close the editor without saving
-  }, []);
+  // The JsonEditor for individual tools is removed from here.
+  // App.jsx will now handle rendering JsonEditor for the consolidatedJsonData.
 
-  const handleDataReady = useCallback((toolId, data) => {
-    setAnalysisDataStore(prevStore => ({
-      ...prevStore,
-      [toolId]: data,
-    }));
-  }, []);
-
-  // If a tool is being edited, render the JsonEditor
-  if (editingTool && analysisDataStore[editingTool.toolId]) {
-    return (
-      <div className="h-full w-full bg-gray-50 border-l border-gray-200 flex flex-col">
-        {/* The JsonEditor itself should handle its internal padding and layout */}
-        <JsonEditor
-          initialJsonObject={analysisDataStore[editingTool.toolId]}
-          onSave={handleSaveEdits}
-          onCancel={handleCancelEdits}
-          toolTitle={editingTool.title}
-        />
-      </div>
-    );
-  }
-
-  // Otherwise, render the list of AnalysisToolCards
   return (
-    <div className="h-full w-full overflow-y-auto p-4 bg-gray-50 border-l border-gray-200">
-      <h2 className="text-xl font-semibold mb-4 text-gray-800">Analysis Tools</h2>
-      {!imageUrl && (
-        <p className="text-sm text-gray-500 italic mb-4">
-          Upload an image to enable analysis tools.
-        </p>
-      )}
-      {tools.map((tool) => (
-        <AnalysisToolCard
-          key={tool.toolId}
-          title={tool.title}
-          toolId={tool.toolId}
-          imageUrl={imageUrl}
-          jsonData={analysisDataStore[tool.toolId]} // Pass current data for this tool
-          onEditRequest={handleEditRequest} // Pass callback to initiate editing
-          onDataReady={handleDataReady} // Pass callback for when tool fetches/updates data
-        />
-      ))}
+    <div className="h-full w-full flex flex-col bg-gray-50">
+      {/* Header for Analysis Tools and Edit Consolidated Data Button */}
+      <div className="p-4 border-b border-gray-200">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-xl font-semibold text-gray-800">Analysis Tools</h2>
+          <button
+            onClick={onRequestEditConsolidatedData}
+            className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 text-sm font-medium"
+            aria-label="Edit DiagramIQ Consolidated Data"
+          >
+            View/Edit DiagramIQ Data
+          </button>
+        </div>
+        {!imageUrl && (
+          <p className="text-sm text-gray-500 italic">
+            Upload an image to enable analysis tools.
+          </p>
+        )}
+      </div>
+
+      {/* Scrollable area for tool cards */}
+      <div className="flex-grow overflow-y-auto p-4">
+        {tools.map((tool) => {
+          // Determine the key used in consolidatedData (e.g., 'edges_fewshot' from 'edges-fewshot')
+          const toolDataKey = tool.toolId.replace('-', '_');
+          const capturedDataForThisTool = consolidatedData ? consolidatedData[toolDataKey] : null;
+
+          return (
+            <AnalysisToolCard
+              key={tool.toolId}
+              title={tool.title}
+              toolId={tool.toolId}
+              imageUrl={imageUrl}
+              // Pass the already captured data for this tool (if any) for context or display
+              // The card will primarily manage its own 'latestRunData' for display after a run.
+              initiallyCapturedData={capturedDataForThisTool}
+              onCaptureData={onCaptureData} // Pass the callback to capture data
+              // consolidatedData can be passed if tools need broader context for their "Run" operation
+              // For example, few-shot might need OCR and Node results.
+              // Let's pass the whole thing for now, AnalysisToolCard can decide what to use.
+              currentConsolidatedData={consolidatedData}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }

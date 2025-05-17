@@ -1,69 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import JSONInput from 'react-json-editor-ajrm';
-import locale from 'react-json-editor-ajrm/locale/en';
 
 export default function JsonEditor({ initialJsonObject, onSave, onCancel, toolTitle }) {
-  // Use a key to force re-mount and reset of JSONInput when initialJsonObject changes.
-  const [editorKey, setEditorKey] = useState(Date.now());
-
-  // Initialize currentJson with a deep clone of initialJsonObject.
-  const [currentJson, setCurrentJson] = useState(() => {
-    try {
-      // Ensure initialJsonObject is not undefined before stringifying
-      if (typeof initialJsonObject === 'undefined') {
-        console.warn("[JsonEditor] initialJsonObject is undefined during initial useState, initializing currentJson to {}");
-        return {};
-      }
-      return JSON.parse(JSON.stringify(initialJsonObject));
-    } catch (e) {
-      console.error("Error cloning initialJsonObject for JsonEditor during initial useState:", e, "Initial object was:", initialJsonObject);
-      return {}; // Fallback
-    }
-  });
+  const [jsonText, setJsonText] = useState('');
   const [hasError, setHasError] = useState(false);
 
+  // When the editor opens or initialJsonObject changes, load the JSON as a string
   useEffect(() => {
-    // When the initialJsonObject prop changes, reset internal state with a new deep clone.
     try {
-      if (typeof initialJsonObject === 'undefined') {
-        console.warn("[JsonEditor] useEffect: initialJsonObject is undefined, resetting currentJson to {}");
-        setCurrentJson({});
-      } else {
-        setCurrentJson(JSON.parse(JSON.stringify(initialJsonObject)));
-      }
-    } catch (e) {
-      console.error("Error cloning initialJsonObject in useEffect for JsonEditor:", e, "Initial object was:", initialJsonObject);
-      setCurrentJson({}); // Fallback
-    }
-    setEditorKey(Date.now()); // Reset editor view
-    setHasError(false);
-  }, [initialJsonObject]);
-
-  const handleEditorChange = (data) => {
-    // This is the simpler version before extensive debugging logs were added here.
-    if (data.jsObject) {
-      setCurrentJson(data.jsObject);
+      const formatted = JSON.stringify(initialJsonObject, null, 2);
+      setJsonText(formatted);
       setHasError(false);
-    } else if (data.error) {
+    } catch (err) {
+      console.error("Failed to format initialJsonObject:", err);
+      setJsonText('');
       setHasError(true);
     }
-    // Note: If data.jsObject is null (e.g. user types "null"), it's valid JSON.
-    // The original library might provide data.jsObject as null in such cases.
-    // The above logic handles this correctly by setting currentJson.
+  }, [initialJsonObject]);
+
+  const handleChange = (e) => {
+    const newText = e.target.value;
+    setJsonText(newText);
+    try {
+      JSON.parse(newText);
+      setHasError(false);
+    } catch {
+      setHasError(true);
+    }
   };
 
   const handleInternalSave = () => {
-    if (!hasError) {
-      // Pass a deep clone of the current internal state to the onSave callback.
-      try {
-        const clonedJsonToSave = JSON.parse(JSON.stringify(currentJson));
-        onSave(clonedJsonToSave);
-      } catch (e) {
-        console.error("Error cloning currentJson on save:", e);
-        alert("Error preparing data for save. Please check console.");
-      }
-    } else {
-      alert("Cannot save, JSON has errors.");
+    try {
+      const parsedJson = JSON.parse(jsonText);
+      onSave(parsedJson);
+    } catch (err) {
+      alert("Cannot save — the JSON is invalid.");
     }
   };
 
@@ -87,28 +57,14 @@ export default function JsonEditor({ initialJsonObject, onSave, onCancel, toolTi
           </button>
         </div>
       </div>
+
       <div className="flex-grow p-4 overflow-y-auto">
-        <JSONInput
-          key={editorKey}
-          placeholder={currentJson}
-          json={JSON.stringify(currentJson, null, 2)}
-          locale={locale}
-          colors={{
-            string: "#DAA520",
-            number: "#1E90FF",
-            colon: "#4A4A4A",
-            keys: "#AC3B61",
-          }}
-          height="100%"
-          width="100%"
-          onChange={handleEditorChange}
-          waitAfterKeyPress={1000} // Original debouncing value
-          confirmGood={false}
-          style={{
-            body: { fontSize: '13px', fontFamily: 'monospace' },
-            container: { border: '1px solid #ddd', borderRadius: '4px', height: '100%' },
-          }}
+        <textarea
+          value={jsonText}
+          onChange={handleChange}
+          className="w-full h-full p-3 font-mono text-sm border border-gray-300 rounded resize-none bg-gray-50"
         />
+        {hasError && <p className="text-red-600 mt-2 text-sm">Invalid JSON. Please correct before saving.</p>}
       </div>
     </div>
   );
