@@ -1,65 +1,23 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import React from 'react';
+// Import the custom hook to use our new context
+import { useEquipmentLibrary } from './EquipmentLibraryContext';
 
-const API_BASE_URL = "http://localhost:5000"; // This should ideally come from a shared config
 
 const EquipmentLibraryView = () => {
-  // State for the list of equipment in the left pane
-  const [equipmentList, setEquipmentList] = useState([]);
-  const [isLoadingList, setIsLoadingList] = useState(false);
-  const [listError, setListError] = useState(null);
+  // Consume the context to get all state and functions.
+  // All the complex useState and useEffect hooks are gone from the view!
+  const {
+    equipmentList,
+    isLoadingList,
+    listError,
+    selectedId,
+    setSelectedId,
+    selectedEquipment,
+    isLoadingDetails,
+    detailsError,
+  } = useEquipmentLibrary();
 
-  // State for the currently selected equipment and its details in the right pane
-  const [selectedId, setSelectedId] = useState(null);
-  const [selectedEquipment, setSelectedEquipment] = useState(null);
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
-  const [detailsError, setDetailsError] = useState(null);
-
-  // Fetch the list of all equipment on component mount
-  const fetchEquipmentList = useCallback(async () => {
-    setIsLoadingList(true);
-    setListError(null);
-    try {
-      // Assumes a backend endpoint GET /library/equipment that returns [{id, name}, ...]
-      const response = await axios.get(`${API_BASE_URL}/library/equipment`);
-      setEquipmentList(response.data.equipment || []);
-    } catch (error) {
-      console.error("Error fetching equipment list:", error);
-      setListError("Failed to load equipment list. Is the backend server running?");
-    } finally {
-      setIsLoadingList(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchEquipmentList();
-  }, [fetchEquipmentList]);
-
-  // Fetch the full details of an equipment item when it's selected
-  useEffect(() => {
-    if (!selectedId) {
-      setSelectedEquipment(null);
-      return;
-    }
-
-    const fetchDetails = async () => {
-      setIsLoadingDetails(true);
-      setDetailsError(null);
-      try {
-        // Assumes an endpoint GET /library/equipment/:id for detailed data
-        const response = await axios.get(`${API_BASE_URL}/library/equipment/${selectedId}`);
-        setSelectedEquipment(response.data);
-      } catch (error) {
-        console.error(`Error fetching details for equipment ${selectedId}:`, error);
-        setDetailsError("Failed to load equipment details.");
-      } finally {
-        setIsLoadingDetails(false);
-      }
-    };
-
-    fetchDetails();
-  }, [selectedId]);
-
+  // The JSX remains identical, but it's now powered by the context state.
   return (
     <div className="flex h-full bg-gray-100">
       {/* Left Pane: Equipment List */}
