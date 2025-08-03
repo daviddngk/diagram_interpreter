@@ -10,6 +10,7 @@ export default function AnalysisPanel({
 }) {
   // Define the tools. This could also be moved to a constants file.
   const tools = [
+    { title: 'Classify Diagram', toolId: 'classify' },
     { title: 'OCR Results', toolId: 'ocr' },
     { title: 'Node Detection (LLM)', toolId: 'nodes' },
     { title: 'Edge Detection (LLM)', toolId: 'edges' },

@@ -15,7 +15,12 @@ import json # For potentially parsing LLM response if needed
 
 # Import your service functions
 from services.ocr_engine import extract_text_blocks
-from services.edge_detector_fewshot_llm import detect_edges_fewshot # Import the new service
+from services.edge_detector_fewshot_llm import detect_edges_fewshot 
+from services.diagram_classifier_engine import classify_diagram_from_url
+# --- NEW: Import for Equipment Library ---
+from library_routes import library_bp, close_db
+# ----------------------------------------
+
 # Note: analyze_diagram_from_url is defined locally in this file now
 # from services.node_detector_yolo import detect_equipment_nodes # No longer using YOLO for this endpoint
 
@@ -59,11 +64,18 @@ cors = CORS(app, resources={
     r"/analyze/ocr": {"origins": "http://localhost:3000"}, # Added OCR route
     r"/analyze/nodes": {"origins": "http://localhost:3000"}, # Add Node Detection route
     r"/analyze/edges": {"origins": "http://localhost:3000"},  # Add Edge Detection route
-    r"/analyze/edges-fewshot": {"origins": "http://localhost:3000"} # Add Few-Shot Edge Detection route
+    r"/analyze/edges-fewshot": {"origins": "http://localhost:3000"}, # Add Few-Shot Edge Detection route
+    r"/analyze/classify": {"origins": "http://localhost:3000"}, # Add Diagram Classifier route
+    r"/library/*": {"origins": "http://localhost:3000"} # Add Equipment Library routes
 })
 # Note: For production, you would replace or add your deployed frontend URL.
 # Example: {"origins": ["http://localhost:3000", "https://your-deployed-app.com"]}
 # ---------------------------------
+
+# --- NEW: Register a function to close the DB connection from the library ---
+# This ensures the SQLite connection is closed after each request to a library route.
+app.teardown_appcontext(close_db)
+# --------------------------------------------------------------------------
 
 # --- Global variable to hold pre-loaded reference text ---
 REFERENCE_MARKDOWN_CONTENT = None
@@ -126,7 +138,7 @@ def generate_upload_url_route():
         traceback.print_exc() # Print full traceback to server logs
         return jsonify({"error": f"Failed to generate signed URL: {str(e)}"}), 500
 
-# --- Route: Analyze Diagram (Original OpenAI Description) ---
+# --- Route: Analyze Diagram (Original OpenAI Description) --- (not used right now)
 @app.route("/analyze", methods=["POST"])
 def analyze_route():
     if not openai.api_key:
@@ -450,6 +462,40 @@ def handle_edge_detection_fewshot_llm():
         traceback.print_exc()
         return jsonify({"error": "An unexpected error occurred during Few-Shot Edge Detection analysis."}), 500
 
+# --- Route: Diagram Classification ---
+@app.route('/analyze/classify', methods=['POST'])
+def analyze_classify_diagram_style():
+    """
+    Endpoint to classify the diagram style using the LLM.
+    Expects JSON: {"image_url": "GCS public URL of the image"}
+    """
+    try:
+        data = request.get_json()
+        if not data or 'image_url' not in data:
+            app.logger.error("Missing image_url in /analyze/classify request")
+            return jsonify({"error": "Missing image_url in request"}), 400
+
+        image_url = data['image_url']
+        app.logger.info(f"Received request for diagram style classification: {image_url}")
+
+        # Call the classification engine function
+        classification_result = classify_diagram_from_url(image_url)
+        
+        app.logger.info(f"Diagram style classification successful for: {image_url}. Result: {classification_result}")
+        return jsonify(classification_result), 200
+
+    except ValueError as ve: # Catch specific errors from the engine
+        app.logger.error(f"Classification ValueError in /analyze/classify: {ve}")
+        return jsonify({"error": str(ve)}), 400 # Or 500 if it's an unexpected config issue
+    except Exception as e:
+        app.logger.error(f"Error during diagram style classification in /analyze/classify: {e}")
+        traceback.print_exc() 
+        return jsonify({"error": "An unexpected error occurred during classification."}), 500
+
+# --- NEW: Register the Blueprint for the equipment library ---
+# All routes from library_routes.py will now be active under the /library URL prefix.
+app.register_blueprint(library_bp, url_prefix='/library')
+# -------------------------------------------------------------
 
 if __name__ == "__main__":
     # Perform checks for essential environment variables on startup

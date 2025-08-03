@@ -64,37 +64,37 @@ Baseband 6630 has the following hardware characteristics:
 ##Front Panel Image URL: https://storage.googleapis.com/context_image_bucket/BB6630_fp.png
 ##Port Map Image URL: https://storage.googleapis.com/context_image_bucket/BB6630_pm.png
 ##Port Definitions Table:
-| id      | type     | location         | direction       | spec       | rate                 |
-|---------|----------|------------------|-----------------|------------|----------------------|
-| POWER-A | power    | left-top         | input           | -48v       | n/a                  |
-| POWER-B | power    | left-bottom      | input           | -48v       | n/a                  |
-| TN-A    | fiber    | top-row-1        | bi-directional  | SFP/SFP+   | 10/1Gbps             |
-| TN-B    | fiber    | top-row-2        | bi-directional  | SFP/SFP+   | 10/1Gbps             |
+| id      | type     | location         | direction       | spec       | rate              |
+|---------|----------|------------------|------------------|------------|-------------------|
+| POWER-A | power    | left-top         | input           | -48v       | n/a               |
+| POWER-B | power    | left-bottom      | input           | -48v       | n/a               |
+| TN-A    | fiber    | top-row-1        | bi-directional  | SFP/SFP+   | 10/1Gbps          |
+| TN-B    | fiber    | top-row-2        | bi-directional  | SFP/SFP+   | 10/1Gbps          |
 | IDL-A   | fiber    | top-row-3        | bi-directional  | CPRI       | 2.5/4.9/9.8/10.1Gbps |
 | IDL-B   | fiber    | top-row-4        | bi-directional  | CPRI       | 2.5/4.9/9.8/10.1Gbps |
 | RI-A    | fiber    | top-row-5        | bi-directional  | CPRI       | 2.5/4.9/9.8/10.1Gbps |
 | RI-B    | fiber    | top-row-6        | bi-directional  | CPRI       | 2.5/4.9/9.8/10.1Gbps |
 | RI-C    | fiber    | top-row-7        | bi-directional  | CPRI       | 2.5/4.9/9.8/10.1Gbps |
 | RI-D    | fiber    | top-row-8        | bi-directional  | CPRI       | 2.5/4.9/9.8/10.1Gbps |
-| RI-E    | fiber    | top-row-9        | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-F    | fiber    | top-row-10       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-G    | fiber    | top-row-11       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-H    | fiber    | top-row-12       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-J    | fiber    | top-row-13       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-K    | fiber    | top-row-14       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-L    | fiber    | top-row-15       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-M    | fiber    | top-row-16       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-N    | fiber    | top-row-17       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-P    | fiber    | top-row-18       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| RI-Q    | fiber    | top-row-19       | bi-directional  | CPRI/eCPRI | 10/25Gbps            |
-| TN-C    | ethernet | right-top-1      | bi-directional  | RJ45       | 100Mbps/1Gbps        |
-| TN-D    | ethernet | right-bottom-1   | bi-directional  | RJ45       | 100Mbps/1Gbps        |
-| SYNC    | ethernet | right-top-2      | input           | RJ45       | n/a                  |
-| SAU     |          | right-bottom-2   | bi-directional  | RJ45       |                      |
-| LMT     |          | right-top-3      | bi-directional  | RJ45       |                      |
-| EC      |          | right-bottom-3   | bi-directional  | RJ45       |                      |
-| ALARM1  | alarm    | right-top-4      | output          | RJ45       | n/a                  |
-| ALARM2  | alarm    | right-bottom-5   | output          | RJ45       | n/a                  |
+| RI-E    | fiber    | top-row-9        | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-F    | fiber    | top-row-10       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-G    | fiber    | top-row-11       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-H    | fiber    | top-row-12       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-J    | fiber    | top-row-13       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-K    | fiber    | top-row-14       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-L    | fiber    | top-row-15       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-M    | fiber    | top-row-16       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-N    | fiber    | top-row-17       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-P    | fiber    | top-row-18       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| RI-Q    | fiber    | top-row-19       | bi-directional  | CPRI/eCPRI | 10/25Gbps          |
+| TN-C    | ethernet | right-top-1      | bi-directional  | RJ45       | 100Mbps/1Gbps      |
+| TN-D    | ethernet | right-bottom-1   | bi-directional  | RJ45       | 100Mbps/1Gbps      |
+| SYNC    | ethernet | right-top-2      | input           | RJ45       | n/a               |
+| SAU     |          | right-bottom-2   | bi-directional  | RJ45       |                   |
+| LMT     |          | right-top-3      | bi-directional  | RJ45       |                   |
+| EC      |          | right-bottom-3   | bi-directional  | RJ45       |                   |
+| ALARM1  | alarm    | right-top-4      | output          | RJ45       | n/a               |
+| ALARM2  | alarm    | right-bottom-5   | output          | RJ45       | n/a               |
 
 #Router 6675
 ##Description
@@ -106,7 +106,7 @@ The Router 6675 will provide connection to the core network and transmission to 
 ##Port Map Image URL: https://storage.googleapis.com/context_image_bucket/R6675_pm.png
 ##Port Definitions Table:
 | id      | type        | location         | direction       | spec       | rate            |
-|---------|-------------|------------------|-----------------|------------|-----------------|
+|---------|-------------|------------------|------------------|------------|-----------------|
 | POWER-A | power       | left-top         | input           | -48v       | n/a             |
 | POWER-B | power       | left-bottom      | input           | -48v       | n/a             |
 | 1       | fiber       | top-row-1        | bi-directional  | SFP+       | 1/2.5/10Gbps    |
