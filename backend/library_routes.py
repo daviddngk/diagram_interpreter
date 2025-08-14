@@ -1,6 +1,6 @@
 import sqlite3
-from flask import Blueprint, jsonify, g
 import os
+from flask import Blueprint, jsonify, g, request
 
 # Define the Blueprint for library routes
 library_bp = Blueprint('library_bp', __name__)
@@ -25,7 +25,17 @@ def close_db(e=None):
     if db is not None:
         db.close()
 
-# --- API Routes ---
+# --- Helper Functions ---
+
+def get_port_by_id(port_id):
+    """Helper function to fetch a single port by its ID."""
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM port WHERE id = ?", (port_id,))
+    port_row = cursor.fetchone()
+    return dict(port_row) if port_row else None
+
+# --- Equipment API Routes ---
 
 @library_bp.route('/equipment', methods=['GET'])
 def get_equipment_list():
@@ -35,22 +45,17 @@ def get_equipment_list():
         cursor = db.cursor()
         cursor.execute("SELECT id, name FROM equipment ORDER BY name ASC")
         equipment = cursor.fetchall()
-        # Convert the list of Row objects to a list of dictionaries
         equipment_list = [dict(row) for row in equipment]
-        # The frontend expects the data under an "equipment" key
         return jsonify({"equipment": equipment_list})
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         return jsonify({"error": "A database error occurred."}), 500
-
 
 @library_bp.route('/equipment/<int:equipment_id>', methods=['GET'])
 def get_equipment_details(equipment_id):
     """Fetches all details for a single piece of equipment, including its ports."""
     try:
         db = get_db()
-        
-        # Fetch main equipment details
         equip_cursor = db.cursor()
         equip_cursor.execute("SELECT * FROM equipment WHERE id = ?", (equipment_id,))
         equipment_row = equip_cursor.fetchone()
@@ -60,7 +65,6 @@ def get_equipment_details(equipment_id):
 
         equipment_details = dict(equipment_row)
 
-        # Fetch and attach associated ports
         port_cursor = db.cursor()
         port_cursor.execute("SELECT * FROM port WHERE equipment_id = ? ORDER BY label ASC", (equipment_id,))
         port_rows = port_cursor.fetchall()
@@ -71,3 +75,134 @@ def get_equipment_details(equipment_id):
         print(f"Database error: {e}")
         return jsonify({"error": "A database error occurred."}), 500
 
+@library_bp.route('/equipment', methods=['POST'])
+def create_equipment():
+    """Creates a new equipment item."""
+    data = request.get_json()
+    if not data or not data.get('name'):
+        return jsonify({"error": "Missing required field: name"}), 400
+
+    sql = '''INSERT INTO equipment(name, description, front_panel_image, port_map_image)
+             VALUES(?,?,?,?)'''
+    params = (
+        data.get('name'),
+        data.get('description'),
+        data.get('front_panel_image'),
+        data.get('port_map_image')
+    )
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(sql, params)
+        db.commit()
+        return jsonify({"message": "Equipment created successfully", "id": cursor.lastrowid}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": f"Equipment with name '{data.get('name')}' already exists."}), 409
+    except sqlite3.Error as e:
+        db.rollback()
+        print(f"Database error on create: {e}")
+        return jsonify({"error": "A database error occurred during creation."}), 500
+
+@library_bp.route('/equipment/<int:equipment_id>', methods=['PUT'])
+def update_equipment(equipment_id):
+    """Updates an existing equipment item."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body cannot be empty."}), 400
+
+    sql = '''UPDATE equipment SET name = ?, description = ?, front_panel_image = ?, port_map_image = ?
+             WHERE id = ?'''
+    params = (
+        data.get('name'),
+        data.get('description'),
+        data.get('front_panel_image'),
+        data.get('port_map_image'),
+        equipment_id
+    )
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(sql, params)
+        db.commit()
+        return jsonify({"message": f"Equipment {equipment_id} updated successfully."})
+    except sqlite3.Error as e:
+        db.rollback()
+        print(f"Database error on update: {e}")
+        return jsonify({"error": "A database error occurred during update."}), 500
+
+@library_bp.route('/equipment/<int:equipment_id>', methods=['DELETE'])
+def delete_equipment(equipment_id):
+    """Deletes an equipment item and its associated ports."""
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        # First, delete associated ports to satisfy foreign key constraints
+        cursor.execute("DELETE FROM port WHERE equipment_id = ?", (equipment_id,))
+        # Then, delete the equipment item
+        cursor.execute("DELETE FROM equipment WHERE id = ?", (equipment_id,))
+        db.commit()
+        return jsonify({"message": f"Equipment {equipment_id} deleted successfully."})
+    except sqlite3.Error as e:
+        db.rollback()
+        print(f"Database error on delete: {e}")
+        return jsonify({"error": "A database error occurred during deletion."}), 500
+
+# --- Port Specific CRUD Routes ---
+
+@library_bp.route('/equipment/<int:equipment_id>/ports', methods=['POST'])
+def add_port(equipment_id):
+    """Adds a new port to a specific piece of equipment."""
+    data = request.get_json()
+    if not data or not data.get('label'):
+        return jsonify({"error": "Missing required field: label"}), 400
+
+    sql = '''INSERT INTO port(equipment_id, label, type, direction, rate)
+             VALUES(?,?,?,?,?)'''
+    params = (
+        equipment_id,
+        data.get('label'),
+        data.get('type'),
+        data.get('direction'),
+        data.get('rate')
+    )
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute(sql, params)
+        db.commit()
+        new_port = get_port_by_id(cursor.lastrowid)
+        return jsonify(new_port), 201
+    except sqlite3.Error as e:
+        db.rollback()
+        print(f"Database error on port create: {e}")
+        return jsonify({"error": "Database error creating port."}), 500
+
+@library_bp.route('/ports/<int:port_id>', methods=['PUT'])
+def update_port(port_id):
+    """Updates an existing port."""
+    data = request.get_json()
+    sql = '''UPDATE port SET label = ?, type = ?, direction = ?, rate = ?
+             WHERE id = ?'''
+    params = (data.get('label'), data.get('type'), data.get('direction'), data.get('rate'), port_id)
+    try:
+        db = get_db()
+        db.execute(sql, params)
+        db.commit()
+        updated_port = get_port_by_id(port_id)
+        return jsonify(updated_port)
+    except sqlite3.Error as e:
+        db.rollback()
+        print(f"Database error on port update: {e}")
+        return jsonify({"error": "Database error updating port."}), 500
+
+@library_bp.route('/ports/<int:port_id>', methods=['DELETE'])
+def delete_port(port_id):
+    """Deletes a port."""
+    try:
+        db = get_db()
+        db.execute("DELETE FROM port WHERE id = ?", (port_id,))
+        db.commit()
+        return jsonify({"message": f"Port {port_id} deleted successfully."})
+    except sqlite3.Error as e:
+        db.rollback()
+        return jsonify({"error": "Database error deleting port."}), 500

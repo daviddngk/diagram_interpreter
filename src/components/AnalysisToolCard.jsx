@@ -125,7 +125,7 @@ export default function AnalysisToolCard({
           
           {latestRunData && !isLoading && isExpanded && (
             <pre className="whitespace-pre-wrap break-words bg-gray-50 p-3 rounded text-xs border border-gray-200 max-h-96 overflow-y-auto">
-              {typeof latestRunData === 'string' ? latestRunDatarunData : JSON.stringify(latestRunData, null, 2)}
+              {typeof latestRunData === 'string' ? latestRunData : JSON.stringify(latestRunData, null, 2)}
             </pre>
           )}
           

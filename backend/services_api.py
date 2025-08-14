@@ -55,19 +55,15 @@ if not openai.api_key:
 
 app = Flask(__name__)
 
-# --- Explicit CORS Configuration ---
-# Allow requests specifically from your frontend development server origin
-# for the routes that the frontend needs to call.
-cors = CORS(app, resources={
-    r"/generate-upload-url": {"origins": "http://localhost:3000"},
-    r"/analyze": {"origins": "http://localhost:3000"},
-    r"/analyze/ocr": {"origins": "http://localhost:3000"}, # Added OCR route
-    r"/analyze/nodes": {"origins": "http://localhost:3000"}, # Add Node Detection route
-    r"/analyze/edges": {"origins": "http://localhost:3000"},  # Add Edge Detection route
-    r"/analyze/edges-fewshot": {"origins": "http://localhost:3000"}, # Add Few-Shot Edge Detection route
-    r"/analyze/classify": {"origins": "http://localhost:3000"}, # Add Diagram Classifier route
-    r"/library/*": {"origins": "http://localhost:3000"} # Add Equipment Library routes
-})
+# --- Robust CORS Configuration ---
+# This single configuration block correctly handles all requests from your
+# frontend, allowing all necessary methods (including PUT and DELETE)
+# and supporting credentials. This resolves the "Network Error".
+CORS(
+    app,
+    resources={r"/*": {"origins": "http://localhost:3000"}},
+    supports_credentials=True
+)
 # Note: For production, you would replace or add your deployed frontend URL.
 # Example: {"origins": ["http://localhost:3000", "https://your-deployed-app.com"]}
 # ---------------------------------
