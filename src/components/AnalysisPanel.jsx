@@ -1,13 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import AnalysisToolCard from './AnalysisToolCard';
+import EdgeTraceToolCard from './EdgeTraceToolCard';
+import EdgeTraceModal from './EdgeTraceModal';
 // JsonEditor is no longer invoked directly by AnalysisPanel for individual tools
 
 export default function AnalysisPanel({
+  imageFile, // The raw image file object for local uploads
   imageUrl,
   consolidatedData, // The entire DiagramIQ data object
   onCaptureData, // Callback to capture a tool's output into consolidatedData
   onRequestEditConsolidatedData, // Callback to signal App to show the main JsonEditor
 }) {
+  // State for the Edge Trace modal
+  const [isEdgeTraceModalOpen, setIsEdgeTraceModalOpen] = useState(false);
+
   // Define the tools. This could also be moved to a constants file.
   const tools = [
     { title: 'Classify Diagram', toolId: 'classify' },
@@ -15,8 +21,15 @@ export default function AnalysisPanel({
     { title: 'Node Detection (LLM)', toolId: 'nodes' },
     { title: 'Edge Detection (LLM)', toolId: 'edges' },
     { title: 'Edge Detection (Few Shot LLM)', toolId: 'edges-fewshot' },
+    { title: 'Port Match (LLM)', toolId: 'port-match-llm' },
     // { title: 'Relationship Analysis', toolId: 'relationships' },
   ];
+
+  const handleRunEdgeTrace = () => {
+    if (imageUrl) {
+      setIsEdgeTraceModalOpen(true);
+    }
+  };
 
   // Individual tool editing state and handlers are removed as editing is now centralized.
   // analysisDataStore is removed; data is either local to AnalysisToolCard (for latest run)
@@ -70,7 +83,20 @@ export default function AnalysisPanel({
             />
           );
         })}
+
+        <EdgeTraceToolCard
+          imageFile={imageFile}
+          imageUrl={imageUrl}
+          onRunTrace={handleRunEdgeTrace}
+        />
       </div>
+      <EdgeTraceModal
+        isOpen={isEdgeTraceModalOpen}
+        onClose={() => setIsEdgeTraceModalOpen(false)}
+        imageFile={imageFile}
+        imageUrl={imageUrl}
+        onCaptureData={onCaptureData}
+      />
     </div>
   );
 }

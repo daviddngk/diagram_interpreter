@@ -8,10 +8,15 @@ export default function AnalysisToolCard({
   toolId,
   imageUrl,
   // initiallyCapturedData, // Data for this tool already in consolidatedData (can be used for display if needed)
-  onCaptureData,         // Callback to capture latestRunData into consolidatedData
-  currentConsolidatedData // The entire consolidatedData, for context
+  onCaptureData, // Callback to capture latestRunData into consolidatedData
+  currentConsolidatedData, // The entire consolidatedData, for context
+  showCaptureButton = true,
+  onRun, // Optional: Override the default run analysis behavior
+  runButtonText = 'Run', // Optional: Override the button text
+  isLoading: isLoadingProp, // Optional: Override the loading state
+  isRunDisabled: isRunDisabledProp, // Optional: Override the disabled state
 }) {
-  const [isLoading, setIsLoading] = useState(false);
+  const [internalIsLoading, setInternalIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [latestRunData, setLatestRunData] = useState(null); // Stores the result of the most recent "Run"
@@ -23,7 +28,7 @@ export default function AnalysisToolCard({
     setIsExpanded(false);
   }, [imageUrl]);
 
-  const runAnalysis = useCallback(async () => {
+  const internalRunAnalysis = useCallback(async () => {
     if (!imageUrl) {
       setError("Please upload an image first.");
       setLatestRunData(null);
@@ -31,7 +36,7 @@ export default function AnalysisToolCard({
       return;
     }
 
-    setIsLoading(true);
+    setInternalIsLoading(true);
     setError(null);
     setLatestRunData(null); // Clear previous run data before new run
 
@@ -39,8 +44,13 @@ export default function AnalysisToolCard({
       const analysisUrl = `${API_BASE_URL}/analyze/${toolId}`;
       const payload = { image_url: imageUrl };
 
+      // Special handling for Port Matcher which needs the whole DiagramIQ
+      if (toolId === 'port-match-llm') {
+        payload.diagram_iq = currentConsolidatedData;
+        console.log(`[${title}] Running with DiagramIQ context:`, currentConsolidatedData);
+      }
       // Add context data if this tool can use it (e.g., few-shot learning)
-      if (toolId === 'edges-fewshot' || toolId === 'nodes' || toolId === 'edges') { // Or any other tool that might benefit
+      else if (toolId === 'edges-fewshot' || toolId === 'nodes' || toolId === 'edges') { // Or any other tool that might benefit
         const contextData = {};
         if (currentConsolidatedData?.ocr) {
           contextData.ocr_results = currentConsolidatedData.ocr;
@@ -68,7 +78,7 @@ export default function AnalysisToolCard({
       setError(backendErrorMessage || err.message || `Failed to run ${title} analysis.`);
       setLatestRunData(null);
     } finally {
-      setIsLoading(false);
+      setInternalIsLoading(false);
     }
   }, [imageUrl, toolId, title, currentConsolidatedData]);
 
@@ -81,12 +91,17 @@ export default function AnalysisToolCard({
     }
   };
 
+  // Determine which values to use: props if provided, otherwise internal state/defaults.
+  const isLoading = isLoadingProp !== undefined ? isLoadingProp : internalIsLoading;
+  const isRunDisabled = isRunDisabledProp !== undefined ? isRunDisabledProp : !imageUrl;
+  const handleRun = onRun || internalRunAnalysis;
+
   return (
     <div className="border rounded-md mb-4 shadow-sm overflow-hidden bg-white">
       <div className="bg-gray-100 p-3 flex justify-between items-center border-b border-gray-200">
         <h3 className="font-semibold text-gray-700">{title}</h3>
         <div className="flex items-center space-x-2">
-          {latestRunData && !error && (
+          {showCaptureButton && latestRunData && !error && (
             <button
               onClick={handleCapture}
               className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors duration-150 font-medium"
@@ -96,11 +111,11 @@ export default function AnalysisToolCard({
             </button>
           )}
            <button
-             onClick={runAnalysis}
-             disabled={isLoading || !imageUrl}
+             onClick={handleRun}
+             disabled={isLoading || isRunDisabled}
              className="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
            >
-             {isLoading ? 'Running...' : 'Run'}
+             {isLoading ? 'Running...' : runButtonText}
            </button>
           {latestRunData && ( // Only show expand/collapse if there's data from the latest run
             <button

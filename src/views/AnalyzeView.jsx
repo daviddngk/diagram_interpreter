@@ -78,6 +78,7 @@ const AnalyzeView = () => {
         {/* Right Column: Analysis Panel */}
         <div className="w-2/5 shrink-0">
           <AnalysisPanel
+            imageFile={selectedImageFile}
             imageUrl={gcsPublicUrl}
             consolidatedData={consolidatedData}
             onCaptureData={handleCaptureToolOutput}

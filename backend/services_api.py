@@ -2,9 +2,8 @@
 import os
 import datetime
 import uuid
-from dotenv import load_dotenv
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from dotenv import load_dotenv 
+from flask import request, jsonify, Response, Blueprint, current_app, send_from_directory
 from google.cloud import storage
 import requests # To fetch image from URL
 from PIL import Image # To open image for OCR/YOLO
@@ -17,8 +16,8 @@ import json # For potentially parsing LLM response if needed
 from services.ocr_engine import extract_text_blocks
 from services.edge_detector_fewshot_llm import detect_edges_fewshot 
 from services.diagram_classifier_engine import classify_diagram_from_url
-# --- NEW: Import for Equipment Library ---
-from library_routes import library_bp, close_db
+from services.edge_trace_engine import execute_next_step
+from services.port_matcher_llm import match_ports_llm
 # ----------------------------------------
 
 # Note: analyze_diagram_from_url is defined locally in this file now
@@ -53,47 +52,25 @@ if not openai.api_key:
     print("Warning: OPENAI_API_KEY environment variable not set. OpenAI features disabled.")
 # --------------------------
 
-app = Flask(__name__)
+# --- Create a Blueprint ---
+# This will hold all the service-related routes.
+services_bp = Blueprint('services_bp', __name__)
 
-# --- Robust CORS Configuration ---
-# This single configuration block correctly handles all requests from your
-# frontend, allowing all necessary methods (including PUT and DELETE)
-# and supporting credentials. This resolves the "Network Error".
-CORS(
-    app,
-    resources={r"/*": {"origins": "http://localhost:3000"}},
-    supports_credentials=True
-)
-# Note: For production, you would replace or add your deployed frontend URL.
-# Example: {"origins": ["http://localhost:3000", "https://your-deployed-app.com"]}
-# ---------------------------------
+# --- Constants for Temp Directory ---
+# This path needs to be accessible from where the app is run.
+# Assuming services_api.py is in backend/, this points to backend/temp/
+TEMP_IMAGE_DIR = os.path.join(os.path.dirname(__file__), 'temp')
+os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
+# ---
 
-# --- NEW: Register a function to close the DB connection from the library ---
-# This ensures the SQLite connection is closed after each request to a library route.
-app.teardown_appcontext(close_db)
-# --------------------------------------------------------------------------
-
-# --- Global variable to hold pre-loaded reference text ---
-REFERENCE_MARKDOWN_CONTENT = None
-REFERENCE_FILE_PATH = os.path.join(os.path.dirname(__file__), 'reference_material', 'site_reference.md') # Updated path
-
-def load_reference_material():
-    """Loads the reference markdown file into the global variable."""
-    global REFERENCE_MARKDOWN_CONTENT
-    try:
-        if os.path.exists(REFERENCE_FILE_PATH):
-            with open(REFERENCE_FILE_PATH, 'r', encoding='utf-8') as f:
-                REFERENCE_MARKDOWN_CONTENT = f.read()
-            print(f"Successfully loaded reference material from: {REFERENCE_FILE_PATH}")
-        else:
-            print(f"Warning: Reference material file not found at {REFERENCE_FILE_PATH}. Few-shot endpoint will lack context.")
-            REFERENCE_MARKDOWN_CONTENT = "" # Set to empty string if not found
-    except Exception as e:
-        print(f"Error loading reference material: {e}")
-        REFERENCE_MARKDOWN_CONTENT = "" # Set to empty string on error
+# --- In-memory store for streaming jobs ---
+# NOTE: In a production environment with multiple workers, this should be
+# replaced with a shared store like Redis or a database.
+TRACE_JOBS = {}
+# ----------------------------------------
 
 # --- Route: Generate GCS Signed URL ---
-@app.route("/generate-upload-url", methods=["POST"])
+@services_bp.route("/generate-upload-url", methods=["POST"])
 def generate_upload_url_route():
     if not storage_client:
         return jsonify({"error": "GCS client not initialized on server."}), 500
@@ -135,7 +112,7 @@ def generate_upload_url_route():
         return jsonify({"error": f"Failed to generate signed URL: {str(e)}"}), 500
 
 # --- Route: Analyze Diagram (Original OpenAI Description) --- (not used right now)
-@app.route("/analyze", methods=["POST"])
+@services_bp.route("/analyze", methods=["POST"])
 def analyze_route():
     if not openai.api_key:
          return jsonify({"error": "OpenAI API key not configured on server."}), 500
@@ -205,7 +182,7 @@ def analyze_diagram_from_url(image_url):
         return jsonify({"error": "An unexpected error occurred during OpenAI analysis."}), 500
 
 # --- Route: OCR Analysis ---
-@app.route('/analyze/ocr', methods=['POST'])
+@services_bp.route('/analyze/ocr', methods=['POST'])
 def handle_ocr_analysis():
     data = request.get_json()
     if not data:
@@ -246,7 +223,7 @@ def handle_ocr_analysis():
         return jsonify({"error": f"An error occurred during OCR processing: {str(e)}"}), 500
 
 # --- Route: Node Detection Analysis (using LLM) ---
-@app.route('/analyze/nodes', methods=['POST'])
+@services_bp.route('/analyze/nodes', methods=['POST'])
 def handle_node_detection_llm(): # Renamed function for clarity
     if not openai.api_key:
          return jsonify({"error": "OpenAI API key not configured on server."}), 500
@@ -325,8 +302,67 @@ def handle_node_detection_llm(): # Renamed function for clarity
         traceback.print_exc()
         return jsonify({"error": "An unexpected error occurred during Node Detection analysis."}), 500
 
+# --- New Route to Serve Temporary Images ---
+@services_bp.route('/temp-images/<path:filename>')
+def serve_temp_image(filename):
+    """
+    Serves the intermediate images generated by the Edge Trace tool.
+    """
+    # Security: Ensure the path is safe and within the intended directory.
+    # send_from_directory handles this securely.
+    return send_from_directory(TEMP_IMAGE_DIR, filename)
+
+# --- Routes for Edge Trace Analysis (using Computer Vision) ---
+
+@services_bp.route('/tools/edge-trace/initiate', methods=['POST'])
+def initiate_edge_trace():
+    """
+    Step 1: Receives an image file, saves it locally, and returns a job ID.
+    """
+    if 'image' not in request.files:
+        return jsonify({"error": "No image file provided in the request."}), 400
+
+    image_file = request.files['image']
+    job_id = str(uuid.uuid4())
+
+    # Save the uploaded file to the temp directory to be used by the engine.
+    # Using a UUID-based name prevents filename conflicts.
+    filename = f"{job_id}_original.png"
+    original_filepath = os.path.join(TEMP_IMAGE_DIR, filename)
+    image_file.save(original_filepath)
+
+    TRACE_JOBS[job_id] = {
+        "original_image_path": original_filepath, # Store the local path
+        "step": 0,
+        "intermediate_data_path": None
+    }
+
+    return jsonify({"job_id": job_id})
+
+@services_bp.route('/tools/edge-trace/execute-step/<job_id>', methods=['POST'])
+def execute_edge_trace_step(job_id):
+    """
+    Executes the next step of an edge trace job and returns the result.
+    This is called sequentially by the client for manual stepping.
+    """
+    job_info = TRACE_JOBS.get(job_id)
+    if not job_info:
+        return jsonify({"error": "Invalid or expired job ID"}), 404
+
+    try:
+        response_data, updated_job_info = execute_next_step(job_info)
+        TRACE_JOBS[job_id] = updated_job_info # Update the job state in our store
+
+        return jsonify(response_data)
+
+    except (FileNotFoundError, ConnectionError, ValueError) as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": "An unexpected error occurred during step execution."}), 500
+
 # --- Route: Edge Detection Analysis (using LLM) ---
-@app.route('/analyze/edges', methods=['POST'])
+@services_bp.route('/analyze/edges', methods=['POST'])
 def handle_edge_detection_llm():
     if not openai.api_key:
          return jsonify({"error": "OpenAI API key not configured on server."}), 500
@@ -396,16 +432,13 @@ def handle_edge_detection_llm():
         return jsonify({"error": "An unexpected error occurred during Edge Detection analysis."}), 500
 
 # --- Route: Edge Detection Analysis (Few Shot LLM) ---
-@app.route('/analyze/edges-fewshot', methods=['POST'])
+@services_bp.route('/analyze/edges-fewshot', methods=['POST'])
 def handle_edge_detection_fewshot_llm():
     # --- Pre-checks (API Key, Reference Content Loading) ---
     if not openai.api_key:
          return jsonify({"error": "OpenAI API key not configured on server."}), 500
-    if REFERENCE_MARKDOWN_CONTENT is None: # Check if loading failed or hasn't happened
-        print("Warning: Reference content not loaded. Attempting to load now.")
-        load_reference_material() # Attempt to load if not already loaded
-        if REFERENCE_MARKDOWN_CONTENT is None: # Check again after attempting load
-             return jsonify({"error": "Failed to load reference material for few-shot analysis."}), 500
+    
+    reference_markdown_content = current_app.config.get('REFERENCE_MARKDOWN_CONTENT')
 
 
     data = request.get_json()
@@ -421,8 +454,8 @@ def handle_edge_detection_fewshot_llm():
         # Simple Truncation: Limit the reference text length.
         # This is a basic approach; more sophisticated methods (chunking, RAG) are better for large docs.
         # Adjust MAX_REF_LENGTH based on model limits and typical prompt size.
-        MAX_REF_LENGTH = 8000 # Example: Limit reference text to ~8k characters
-        truncated_reference = (REFERENCE_MARKDOWN_CONTENT[:MAX_REF_LENGTH] + '...') if len(REFERENCE_MARKDOWN_CONTENT) > MAX_REF_LENGTH else REFERENCE_MARKDOWN_CONTENT
+        MAX_REF_LENGTH = 16000 # Example: Limit reference text to ~16k characters
+        truncated_reference = (reference_markdown_content[:MAX_REF_LENGTH] + '...') if len(reference_markdown_content) > MAX_REF_LENGTH else reference_markdown_content
         if not truncated_reference and REFERENCE_MARKDOWN_CONTENT is not None: # Check if truncation resulted in empty but original wasn't None
             print("Warning: No reference content available for few-shot prompt after potential truncation.")
 
@@ -458,8 +491,57 @@ def handle_edge_detection_fewshot_llm():
         traceback.print_exc()
         return jsonify({"error": "An unexpected error occurred during Few-Shot Edge Detection analysis."}), 500
 
+# --- Route: Port Matching (LLM) ---
+@services_bp.route('/analyze/port-match-llm', methods=['POST'])
+def handle_port_match_llm():
+    if not openai.api_key:
+         return jsonify({"error": "OpenAI API key not configured on server."}), 500
+    
+    reference_markdown_content = current_app.config.get('REFERENCE_MARKDOWN_CONTENT', '')
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing JSON request body"}), 400
+
+    image_url = data.get('image_url')
+    if not image_url:
+        return jsonify({"error": "Missing 'image_url' in request body"}), 400
+
+    # This tool requires context from the Edge Trace (CV) tool.
+    diagram_iq = data.get('diagram_iq', {})
+    edge_trace_output = diagram_iq.get('edge_trace_cv')
+
+    if not edge_trace_output:
+        return jsonify({"error": "Edge Trace (CV) data is required for this tool. Please run that step first."}), 400
+
+    try:
+        # Convert the edge trace python dict to a JSON string for the prompt
+        edge_trace_context_str = json.dumps(edge_trace_output, indent=2)
+
+        # Call the dedicated service function
+        port_match_results = match_ports_llm(
+            image_url=image_url, 
+            reference_context=reference_markdown_content, 
+            edge_trace_context=edge_trace_context_str
+        )
+
+        # The service function returns parsed JSON or an error dict.
+        if "error" in port_match_results:
+           return jsonify(port_match_results), 400
+
+        return jsonify(port_match_results)
+
+    except openai.BadRequestError as e:
+        print(f"OpenAI API BadRequestError during Port Matching: {e}")
+        error_message = f"Could not perform port matching. The model failed to access an image URL. Ensure all URLs are valid and accessible."
+        return jsonify({"error": error_message}), 400
+    except Exception as e:
+        print(f"An unexpected error occurred during LLM Port Matching: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "An unexpected error occurred during Port Matching analysis."}), 500
+
 # --- Route: Diagram Classification ---
-@app.route('/analyze/classify', methods=['POST'])
+@services_bp.route('/analyze/classify', methods=['POST'])
 def analyze_classify_diagram_style():
     """
     Endpoint to classify the diagram style using the LLM.
@@ -468,58 +550,22 @@ def analyze_classify_diagram_style():
     try:
         data = request.get_json()
         if not data or 'image_url' not in data:
-            app.logger.error("Missing image_url in /analyze/classify request")
+            current_app.logger.error("Missing image_url in /analyze/classify request")
             return jsonify({"error": "Missing image_url in request"}), 400
 
         image_url = data['image_url']
-        app.logger.info(f"Received request for diagram style classification: {image_url}")
+        current_app.logger.info(f"Received request for diagram style classification: {image_url}")
 
         # Call the classification engine function
         classification_result = classify_diagram_from_url(image_url)
         
-        app.logger.info(f"Diagram style classification successful for: {image_url}. Result: {classification_result}")
+        current_app.logger.info(f"Diagram style classification successful for: {image_url}. Result: {classification_result}")
         return jsonify(classification_result), 200
 
     except ValueError as ve: # Catch specific errors from the engine
-        app.logger.error(f"Classification ValueError in /analyze/classify: {ve}")
+        current_app.logger.error(f"Classification ValueError in /analyze/classify: {ve}")
         return jsonify({"error": str(ve)}), 400 # Or 500 if it's an unexpected config issue
     except Exception as e:
-        app.logger.error(f"Error during diagram style classification in /analyze/classify: {e}")
+        current_app.logger.error(f"Error during diagram style classification in /analyze/classify: {e}")
         traceback.print_exc() 
         return jsonify({"error": "An unexpected error occurred during classification."}), 500
-
-# --- NEW: Register the Blueprint for the equipment library ---
-# All routes from library_routes.py will now be active under the /library URL prefix.
-app.register_blueprint(library_bp, url_prefix='/library')
-# -------------------------------------------------------------
-
-if __name__ == "__main__":
-    # Perform checks for essential environment variables on startup
-    missing_vars = []
-    if not GCS_BUCKET_NAME: missing_vars.append("GCS_BUCKET_NAME")
-    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"): missing_vars.append("GOOGLE_APPLICATION_CREDENTIALS")
-    if not openai.api_key: missing_vars.append("OPENAI_API_KEY")
-    # Add checks for other required variables (e.g., Tesseract path if needed)
-
-    if missing_vars:
-         print("ERROR: Missing required environment variables:")
-         for var in missing_vars:
-             print(f" - {var}")
-         print("Please set these variables and restart the server.")
-         # Optionally exit if critical variables are missing
-         # exit(1)
-    else:
-        print("All required environment variables seem to be set.")
-
-    # Load reference material on startup
-    load_reference_material()
-
-    print("Starting Flask server...")
-    print("Available routes:")
-    for rule in app.url_map.iter_rules():
-        print(f"- {rule.endpoint}: {rule.rule} ({', '.join(rule.methods)})")
-
-    # Run the Flask app
-    # Use debug=True only for development, set to False in production
-    # host='0.0.0.0' makes it accessible on your network
-    app.run(debug=True, host='0.0.0.0', port=5000)

@@ -11,7 +11,7 @@ if not OPENAI_API_KEY:
 else:
     openai.api_key = OPENAI_API_KEY
 
-DIAGRAM_CLASSIFICATION_PROMPT = """You are a diagram analysis assistant. Your task is to classify the visual representation style(s) used in a diagram image. Diagrams may fall into one or more of the following categories:
+DIAGRAM_CLASSIFICATION_PROMPT = """You are a diagram analysis assistant. Your task is to classify the visual representation style(s) used in a diagram image. Diagrams may fall into one of the following categories:
 
 1. **Abstract Geometric**: Components are represented using simple geometric shapes (e.g., rectangles, circles, lines) with little or no standardized meaning. Labels and layout may provide additional context, but shapes alone do not imply component function.
 
@@ -23,20 +23,36 @@ DIAGRAM_CLASSIFICATION_PROMPT = """You are a diagram analysis assistant. Your ta
 
 5. **Hybrid**: The diagram uses elements from two or more of the categories above (e.g., symbolic components inside a spatial layout, or realistic images mixed with abstract shapes).
 
+Diagrams also have the attributes of Production Style and Intended Use.
+
+Production Style may be one of:
+1.  **Hand Drawn**: Components may be irregular in shape, lines are not straight and may have uneven thickness and color.
+2.  **Computer Aided**: Components are well formed regular shapes, lines are straight, and have consistent thickness and color.
+
+Intended Use may be one of:
+1.  **Indicative**: A diagram that is an example of a valid configuration but variation in details may be acceptable (e.g. connections could be made to different ports of the same type).
+2.  **Specific**: A diagram that is intended to be determinative of every detail depicted.
+3.  **Undetermined**: The intended use is not clear from the diagram alone.
+
 ---
 
 **Instructions**:
 
 1. Examine the image provided.
-2. Decide which representation type(s) apply.
+2. Decide which representation type apply.
+3. Assign the most applicable option for each attributett 
 3. Provide a short explanation of the visual cues that led to your decision.
 4. Return ONLY a valid JSON object with the classification and rationale. Do not include any other text or markdown formatting like ```json before or after the JSON object.
 
 **Output format (ensure this exact JSON structure):**
 
 {
-  "representation_types": ["Symbolic", "Spatial"],
+  "representation_type": "Symbolic",
   "confidence": 0.91,
+  "attributes": {
+    "production_style": "Hand Drawn",
+    "intended_use": "Indicative"
+  },
   "rationale": "Network elements are depicted using standardized icons, and the overall layout reflects rack positions. Ports are symbolic, and component placement aligns with spatial orientation."
 }
 """
