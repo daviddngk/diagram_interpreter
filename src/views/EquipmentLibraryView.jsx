@@ -2,6 +2,7 @@ import React from 'react';
 // Import the custom hook to use our new context
 import { useEquipmentLibrary } from './EquipmentLibraryContext';
 import PortEditModal from '../components/PortEditModal';
+import PortMappingModal from '../components/PortMappingModal';
 
 
 const EquipmentLibraryView = () => {
@@ -30,6 +31,9 @@ const EquipmentLibraryView = () => {
     handleClosePortModal,
     handleSavePort,
     handleDeletePort,
+    isPortMappingModalOpen,
+    handleOpenPortMappingModal,
+    handleClosePortMappingModal,
   } = useEquipmentLibrary();
 
   // The JSX remains identical, but it's now powered by the context state.
@@ -74,6 +78,13 @@ const EquipmentLibraryView = () => {
               {mode === 'view' && selectedId && (
                 <>
                   <button onClick={handleEdit} className="px-4 py-2 text-sm bg-yellow-500 text-white rounded-md hover:bg-yellow-600">Edit</button>
+                  <button
+                    onClick={handleOpenPortMappingModal}
+                    className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-gray-400"
+                    disabled={!selectedEquipment?.front_panel_image && !selectedEquipment?.port_map_image}
+                    title={(!selectedEquipment?.front_panel_image && !selectedEquipment?.port_map_image) ? "Equipment must have a front panel or port map image to map ports." : "Map ports for this equipment"}>
+                    Map Ports
+                  </button>
                   <button onClick={handleDelete} className="px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">Delete</button>
                 </>
               )}
@@ -189,6 +200,12 @@ const EquipmentLibraryView = () => {
           onCancel={handleClosePortModal}
         />
       )}
+      {/* New Port Mapping Modal */}
+      <PortMappingModal
+        isOpen={isPortMappingModalOpen}
+        onClose={handleClosePortMappingModal}
+        equipment={selectedEquipment}
+      />
     </>
   );
 };

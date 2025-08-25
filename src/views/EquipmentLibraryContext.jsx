@@ -35,6 +35,9 @@ export const EquipmentLibraryProvider = ({ children }) => {
   const [isPortModalOpen, setIsPortModalOpen] = useState(false);
   const [editingPort, setEditingPort] = useState(null); // null for new, or port object for edit
 
+  // --- NEW: State for Port Mapping Modal ---
+  const [isPortMappingModalOpen, setIsPortMappingModalOpen] = useState(false);
+
   // ------------------------------------
 
   // All data fetching logic is also moved here
@@ -201,6 +204,20 @@ export const EquipmentLibraryProvider = ({ children }) => {
     }
   };
 
+  // --- NEW: Handlers for Port Mapping Modal ---
+  const handleOpenPortMappingModal = () => {
+    // This check is important to ensure we don't open the modal for equipment without an image.
+    // The button in the view is already disabled, but this is a good safeguard.
+    if (selectedEquipment && (selectedEquipment.front_panel_image || selectedEquipment.port_map_image)) {
+      setIsPortMappingModalOpen(true);
+    }
+  };
+
+  const handleClosePortMappingModal = () => {
+    setIsPortMappingModalOpen(false);
+  };
+
+
   // The value object contains everything we want to expose to consuming components
   const value = {
     equipmentList, isLoadingList, listError,
@@ -208,7 +225,8 @@ export const EquipmentLibraryProvider = ({ children }) => {
     selectedEquipment, isLoadingDetails, detailsError,
     refreshList: fetchEquipmentList, // Expose a function to manually refresh
     mode, formState, handleNew, handleEdit, handleCancel, handleSave, handleDelete, handleFormChange,
-    isPortModalOpen, editingPort, handleOpenPortModal, handleClosePortModal, handleSavePort, handleDeletePort
+    isPortModalOpen, editingPort, handleOpenPortModal, handleClosePortModal, handleSavePort, handleDeletePort,
+    isPortMappingModalOpen, handleOpenPortMappingModal, handleClosePortMappingModal
   };
 
   return (
