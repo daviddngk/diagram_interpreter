@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import json
 from flask import Blueprint, jsonify, g, request
 
 # Define the Blueprint for library routes
@@ -64,6 +65,14 @@ def get_equipment_details(equipment_id):
             return jsonify({"error": "Equipment not found"}), 404
 
         equipment_details = dict(equipment_row)
+
+        # --- NEW: Deserialize JSON field ---
+        if equipment_details.get('port_map_bounding_box'):
+            try:
+                equipment_details['port_map_bounding_box'] = json.loads(equipment_details['port_map_bounding_box'])
+            except (json.JSONDecodeError, TypeError):
+                print(f"Warning: Could not parse port_map_bounding_box for equipment {equipment_id}")
+                equipment_details['port_map_bounding_box'] = None
 
         port_cursor = db.cursor()
         port_cursor.execute("SELECT * FROM port WHERE equipment_id = ? ORDER BY label ASC", (equipment_id,))
@@ -146,6 +155,48 @@ def delete_equipment(equipment_id):
         db.rollback()
         print(f"Database error on delete: {e}")
         return jsonify({"error": "A database error occurred during deletion."}), 500
+
+@library_bp.route('/equipment/<int:equipment_id>/port-map', methods=['PUT'])
+def update_port_map(equipment_id):
+    """
+    Updates the port map for a piece of equipment.
+    This includes the equipment's reference bounding box and the relative
+    coordinates for multiple ports in a single transaction.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body cannot be empty."}), 400
+
+    bounding_box = data.get('port_map_bounding_box')
+    port_coords = data.get('port_coordinates')
+
+    if bounding_box is None or port_coords is None:
+        return jsonify({"error": "Missing 'port_map_bounding_box' or 'port_coordinates' in request."}), 400
+
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        # 1. Update the equipment's bounding box
+        bounding_box_str = json.dumps(bounding_box)
+        cursor.execute(
+            "UPDATE equipment SET port_map_bounding_box = ? WHERE id = ?",
+            (bounding_box_str, equipment_id)
+        )
+
+        # 2. Update the coordinates for each port
+        for port_id, coords in port_coords.items():
+            cursor.execute(
+                "UPDATE port SET coordinate_x = ?, coordinate_y = ? WHERE id = ?",
+                (coords.get('x'), coords.get('y'), port_id)
+            )
+
+        db.commit()
+        return jsonify({"message": f"Port map for equipment {equipment_id} updated successfully."})
+    except sqlite3.Error as e:
+        db.rollback()
+        print(f"Database error on port map update: {e}")
+        return jsonify({"error": "A database error occurred during port map update."}), 500
 
 # --- Port Specific CRUD Routes ---
 

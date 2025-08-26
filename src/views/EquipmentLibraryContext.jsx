@@ -37,6 +37,7 @@ export const EquipmentLibraryProvider = ({ children }) => {
 
   // --- NEW: State for Port Mapping Modal ---
   const [isPortMappingModalOpen, setIsPortMappingModalOpen] = useState(false);
+  const [isSavingMapping, setIsSavingMapping] = useState(false);
 
   // ------------------------------------
 
@@ -217,6 +218,30 @@ export const EquipmentLibraryProvider = ({ children }) => {
     setIsPortMappingModalOpen(false);
   };
 
+  const handleSavePortMapping = async ({ boundingBox, portCoordinates }) => {
+    if (!selectedId) return;
+    setIsSavingMapping(true);
+    try {
+      const payload = {
+        port_map_bounding_box: boundingBox,
+        port_coordinates: portCoordinates,
+      };
+      // This assumes a new backend endpoint designed for this purpose.
+      await axios.put(`${API_BASE_URL}/library/equipment/${selectedId}/port-map`, payload);
+
+      // Success, close modal and refresh data
+      handleClosePortMappingModal();
+      const response = await axios.get(`${API_BASE_URL}/library/equipment/${selectedId}`);
+      setSelectedEquipment(response.data);
+      setFormState(response.data);
+    } catch (error) {
+      console.error("Error saving port mapping:", error);
+      alert(`Failed to save port map: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setIsSavingMapping(false);
+    }
+  };
+
 
   // The value object contains everything we want to expose to consuming components
   const value = {
@@ -226,7 +251,8 @@ export const EquipmentLibraryProvider = ({ children }) => {
     refreshList: fetchEquipmentList, // Expose a function to manually refresh
     mode, formState, handleNew, handleEdit, handleCancel, handleSave, handleDelete, handleFormChange,
     isPortModalOpen, editingPort, handleOpenPortModal, handleClosePortModal, handleSavePort, handleDeletePort,
-    isPortMappingModalOpen, handleOpenPortMappingModal, handleClosePortMappingModal
+    isPortMappingModalOpen, handleOpenPortMappingModal, handleClosePortMappingModal,
+    isSavingMapping, handleSavePortMapping
   };
 
   return (

@@ -34,6 +34,8 @@ const EquipmentLibraryView = () => {
     isPortMappingModalOpen,
     handleOpenPortMappingModal,
     handleClosePortMappingModal,
+    isSavingMapping,
+    handleSavePortMapping,
   } = useEquipmentLibrary();
 
   // The JSX remains identical, but it's now powered by the context state.
@@ -205,6 +207,8 @@ const EquipmentLibraryView = () => {
         isOpen={isPortMappingModalOpen}
         onClose={handleClosePortMappingModal}
         equipment={selectedEquipment}
+        onSave={handleSavePortMapping}
+        isSaving={isSavingMapping}
       />
     </>
   );
