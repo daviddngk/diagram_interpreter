@@ -2,7 +2,6 @@
 import os
 import datetime
 import uuid
-from dotenv import load_dotenv 
 from flask import request, jsonify, Response, Blueprint, current_app, send_from_directory
 from google.cloud import storage
 import requests # To fetch image from URL
@@ -22,35 +21,6 @@ from services.port_matcher_llm import match_ports_llm
 
 # Note: analyze_diagram_from_url is defined locally in this file now
 # from services.node_detector_yolo import detect_equipment_nodes # No longer using YOLO for this endpoint
-
-load_dotenv()
-
-# --- GCS Configuration ---
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
-storage_client = None # Initialize as None
-try:
-    # Check for credentials first
-    if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-        print("Warning: GOOGLE_APPLICATION_CREDENTIALS environment variable not set. GCS features disabled.")
-    elif not GCS_BUCKET_NAME:
-        print("Warning: GCS_BUCKET_NAME environment variable not set. GCS features disabled.")
-    else:
-        # Attempt to initialize only if credentials and bucket name are set
-        storage_client = storage.Client()
-        # Test connection by trying to get the bucket (optional, but good practice)
-        bucket = storage_client.bucket(GCS_BUCKET_NAME)
-        print(f"GCS Client initialized and connected to bucket: {GCS_BUCKET_NAME}")
-except Exception as e:
-    print(f"Error initializing Google Cloud Storage client: {e}. GCS features disabled.")
-    storage_client = None # Ensure it's None on error
-# ---------------------
-
-# --- OpenAI Configuration ---
-# Load API key during initialization
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    print("Warning: OPENAI_API_KEY environment variable not set. OpenAI features disabled.")
-# --------------------------
 
 # --- Create a Blueprint ---
 # This will hold all the service-related routes.
@@ -72,7 +42,10 @@ TRACE_JOBS = {}
 # --- Route: Generate GCS Signed URL ---
 @services_bp.route("/generate-upload-url", methods=["POST"])
 def generate_upload_url_route():
-    if not storage_client:
+    storage_client = current_app.config.get('GCS_CLIENT')
+    bucket_name = current_app.config.get('GCS_BUCKET_NAME')
+
+    if not storage_client or not bucket_name:
         return jsonify({"error": "GCS client not initialized on server."}), 500
     try:
         data = request.get_json()
@@ -89,7 +62,7 @@ def generate_upload_url_route():
         file_ext = os.path.splitext(original_filename)[1]
         unique_blob_name = f"{uuid.uuid4()}{file_ext}"
 
-        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(unique_blob_name)
 
         # Generate the signed URL for PUT request
@@ -102,7 +75,7 @@ def generate_upload_url_route():
 
         # Construct the public URL (assuming public access or signed URL access later)
         # Note: For truly public access, bucket/object ACLs must be set correctly in GCS
-        public_url = f"https://storage.googleapis.com/{GCS_BUCKET_NAME}/{unique_blob_name}"
+        public_url = f"https://storage.googleapis.com/{bucket_name}/{unique_blob_name}"
 
         return jsonify({"signedUrl": signed_url, "publicUrl": public_url})
 

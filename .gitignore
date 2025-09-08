@@ -3,6 +3,7 @@
 backend/routes/__pycache__/
 backend/services/__pycache__/
 backend/*.py[cod]
+backend/__pycache__/
 backend/*.so
 
 # Virtualenv
