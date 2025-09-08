@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import AnalyzeView from './views/AnalyzeView';
 import EquipmentLibraryView from './views/EquipmentLibraryView';
 // Import the provider for the Equipment Library
-import { EquipmentLibraryProvider } from './views/EquipmentLibraryContext'; // Assuming co-location
-import { AnalysisProvider } from './views/AnalysisContext'; // Co-located with view
+import { AnalysisProvider } from './views/AnalysisContext';
+import { EquipmentLibraryProvider } from './views/EquipmentLibraryContext';
 
 const TABS = {
   ANALYZE: 'Analyze',

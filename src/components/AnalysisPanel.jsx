@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import AnalysisToolCard from './AnalysisToolCard';
 import EdgeTraceToolCard from './EdgeTraceToolCard';
+import BoundingBoxToolCard from './BoundingBoxToolCard';
 import EdgeTraceModal from './EdgeTraceModal';
+import BoundingBoxModal from './BoundingBoxModal';
 // JsonEditor is no longer invoked directly by AnalysisPanel for individual tools
 
 export default function AnalysisPanel({
@@ -13,6 +15,7 @@ export default function AnalysisPanel({
 }) {
   // State for the Edge Trace modal
   const [isEdgeTraceModalOpen, setIsEdgeTraceModalOpen] = useState(false);
+  const [isBoundingBoxModalOpen, setIsBoundingBoxModalOpen] = useState(false);
 
   // Define the tools. This could also be moved to a constants file.
   const tools = [
@@ -28,6 +31,12 @@ export default function AnalysisPanel({
   const handleRunEdgeTrace = () => {
     if (imageUrl) {
       setIsEdgeTraceModalOpen(true);
+    }
+  };
+
+  const handleDrawBoundingBox = () => {
+    if (imageUrl) {
+      setIsBoundingBoxModalOpen(true);
     }
   };
 
@@ -89,11 +98,22 @@ export default function AnalysisPanel({
           imageUrl={imageUrl}
           onRunTrace={handleRunEdgeTrace}
         />
+
+        <BoundingBoxToolCard
+          imageUrl={imageUrl}
+          onDraw={handleDrawBoundingBox}
+        />
       </div>
       <EdgeTraceModal
         isOpen={isEdgeTraceModalOpen}
         onClose={() => setIsEdgeTraceModalOpen(false)}
         imageFile={imageFile}
+        imageUrl={imageUrl}
+        onCaptureData={onCaptureData}
+      />
+      <BoundingBoxModal
+        isOpen={isBoundingBoxModalOpen}
+        onClose={() => setIsBoundingBoxModalOpen(false)}
         imageUrl={imageUrl}
         onCaptureData={onCaptureData}
       />
