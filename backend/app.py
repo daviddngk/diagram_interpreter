@@ -2,10 +2,14 @@ import os
 from flask import Flask
 from flask_cors import CORS
 import openai
+from dotenv import load_dotenv
+from google.cloud import storage
 
 # Import blueprints and db closer from your route files
 from library_routes import library_bp, close_db
 from services_api import services_bp
+
+load_dotenv()
 
 def load_reference_material(app):
     """Loads the reference markdown file into the app's config."""
@@ -36,18 +40,36 @@ def create_app():
     # Load reference material into app config
     load_reference_material(app)
 
-    # Register your API blueprints
-    app.register_blueprint(library_bp, url_prefix='/library')
-    app.register_blueprint(services_bp, url_prefix='/') # Register the new services blueprint
-
-    # Ensure the database connection is closed after each request
-    app.teardown_appcontext(close_db)
+    # --- GCS Configuration ---
+    app.config['GCS_BUCKET_NAME'] = os.getenv("GCS_BUCKET_NAME")
+    app.config['GCS_CLIENT'] = None
+    try:
+        if not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+            print("Warning: GOOGLE_APPLICATION_CREDENTIALS environment variable not set. GCS features disabled.")
+        elif not app.config['GCS_BUCKET_NAME']:
+            print("Warning: GCS_BUCKET_NAME environment variable not set. GCS features disabled.")
+        else:
+            storage_client = storage.Client()
+            # Test connection by trying to get the bucket
+            storage_client.bucket(app.config['GCS_BUCKET_NAME'])
+            app.config['GCS_CLIENT'] = storage_client
+            print(f"GCS Client initialized and connected to bucket: {app.config['GCS_BUCKET_NAME']}")
+    except Exception as e:
+        print(f"Error initializing Google Cloud Storage client: {e}. GCS features disabled.")
+        app.config['GCS_CLIENT'] = None
 
     # --- OpenAI Configuration ---
     # Load API key during initialization
     openai.api_key = os.getenv("OPENAI_API_KEY")
     if not openai.api_key:
         print("Warning: OPENAI_API_KEY environment variable not set. OpenAI features disabled.")
+
+    # Register your API blueprints
+    app.register_blueprint(library_bp, url_prefix='/library')
+    app.register_blueprint(services_bp, url_prefix='/') # Register the new services blueprint
+
+    # Ensure the database connection is closed after each request
+    app.teardown_appcontext(close_db)
 
     return app
 
