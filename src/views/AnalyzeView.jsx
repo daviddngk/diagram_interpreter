@@ -2,6 +2,7 @@ import React from 'react';
 import AnalysisPanel from '../components/AnalysisPanel';
 import JsonEditor from '../components/JsonEditor';
 import { useAnalysis } from './AnalysisContext';
+import { useEquipmentLibrary } from './EquipmentLibraryContext';
 
 const AnalyzeView = () => {
   // All state and logic is now consumed from the context.
@@ -19,6 +20,9 @@ const AnalyzeView = () => {
     handleSaveConsolidatedJson,
     setIsEditingConsolidatedJson,
   } = useAnalysis();
+
+  // Consume the equipment library context to get the list of equipment
+  const { equipmentList } = useEquipmentLibrary();
 
   const handleRequestEditConsolidatedJson = () => {
     if (Object.keys(consolidatedData).length > 1 || consolidatedData.diagramIQ_metadata?.gcsImageUrl) {
@@ -82,6 +86,7 @@ const AnalyzeView = () => {
             imageUrl={gcsPublicUrl}
             consolidatedData={consolidatedData}
             onCaptureData={handleCaptureToolOutput}
+            equipmentLibrary={equipmentList}
             onRequestEditConsolidatedData={handleRequestEditConsolidatedJson}
           />
         </div>

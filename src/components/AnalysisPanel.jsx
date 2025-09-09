@@ -9,6 +9,7 @@ import BoundingBoxModal from './BoundingBoxModal';
 export default function AnalysisPanel({
   imageFile, // The raw image file object for local uploads
   imageUrl,
+  equipmentLibrary, // The list of equipment from the library
   consolidatedData, // The entire DiagramIQ data object
   onCaptureData, // Callback to capture a tool's output into consolidatedData
   onRequestEditConsolidatedData, // Callback to signal App to show the main JsonEditor
@@ -116,6 +117,8 @@ export default function AnalysisPanel({
         onClose={() => setIsBoundingBoxModalOpen(false)}
         imageUrl={imageUrl}
         onCaptureData={onCaptureData}
+        consolidatedData={consolidatedData}
+        equipmentLibrary={equipmentLibrary}
       />
     </div>
   );

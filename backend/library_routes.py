@@ -40,17 +40,68 @@ def get_port_by_id(port_id):
 
 @library_bp.route('/equipment', methods=['GET'])
 def get_equipment_list():
-    """Fetches a list of all equipment (id and name)."""
+    """Fetches a list of all equipment, including their associated ports, in a single query."""
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT id, name FROM equipment ORDER BY name ASC")
-        equipment = cursor.fetchall()
-        equipment_list = [dict(row) for row in equipment]
+        
+        # This query uses JSON functions to aggregate ports into a single field,
+        # which is more efficient than making N+1 queries.
+        sql = """
+            SELECT
+                e.*,
+                (
+                    SELECT json_group_array(
+                        json_object(
+                            'id', p.id,
+                            'equipment_id', p.equipment_id,
+                            'label', p.label,
+                            'type', p.type,
+                            'direction', p.direction,
+                            'spec', p.spec,
+                            'rate', p.rate,
+                            'location', p.location,
+                            'coordinate_x', p.coordinate_x,
+                            'coordinate_y', p.coordinate_y
+                        )
+                    )
+                    FROM port p
+                    WHERE p.equipment_id = e.id
+                ) AS ports_json
+            FROM
+                equipment e
+            ORDER BY
+                e.name ASC;
+        """
+        cursor.execute(sql)
+        equipment_rows = cursor.fetchall()
+        
+        equipment_list = []
+        for row in equipment_rows:
+            details = dict(row)
+            
+            # Safely parse the ports_json string. If it's NULL from the DB,
+            # it becomes None in Python, and `or '[]'` makes it a default empty list.
+            try:
+                details['ports'] = json.loads(details.get('ports_json') or '[]')
+            except (json.JSONDecodeError, TypeError):
+                # This is a fallback, but the `or '[]'` should prevent most TypeErrors.
+                details['ports'] = []
+            if 'ports_json' in details:
+                del details['ports_json']
+
+            if details.get('port_map_bounding_box'):
+                try:
+                    details['port_map_bounding_box'] = json.loads(details['port_map_bounding_box'])
+                except (json.JSONDecodeError, TypeError):
+                    details['port_map_bounding_box'] = None
+            
+            equipment_list.append(details)
+            
         return jsonify({"equipment": equipment_list})
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
-        return jsonify({"error": "A database error occurred."}), 500
+        print(f"Database error in get_equipment_list: {e}")
+        return jsonify({"error": "A database error occurred while fetching equipment."}), 500
 
 @library_bp.route('/equipment/<int:equipment_id>', methods=['GET'])
 def get_equipment_details(equipment_id):
