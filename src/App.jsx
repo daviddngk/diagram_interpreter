@@ -32,7 +32,7 @@ function App() {
       <EquipmentLibraryProvider>
         <div className="flex flex-col h-screen bg-gray-100">
           <header className="bg-slate-800 text-white p-4 shadow-md flex justify-between items-center">
-            <h1 className="text-2xl font-bold">Diagram Interpreter - DiagramIQ</h1>
+            <h1 className="text-2xl font-bold">Diagram Interpreter - Proof of Concept</h1>
             <nav>
               {Object.values(TABS).map((tabName) => (
                 <button

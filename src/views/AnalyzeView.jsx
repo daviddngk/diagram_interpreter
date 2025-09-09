@@ -99,7 +99,7 @@ const AnalyzeView = () => {
                 initialJsonObject={consolidatedData}
                 onSave={handleSaveConsolidatedJson}
                 onCancel={() => setIsEditingConsolidatedJson(false)}
-                toolTitle="DiagramIQ - Consolidated Data Editor"
+                toolTitle="Context Data Editor"
              />
           </div>
         </div>

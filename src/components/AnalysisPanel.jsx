@@ -57,9 +57,9 @@ export default function AnalysisPanel({
           <button
             onClick={onRequestEditConsolidatedData}
             className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 text-sm font-medium"
-            aria-label="Edit DiagramIQ Consolidated Data"
+            aria-label="Edit Context Data"
           >
-            View/Edit DiagramIQ Data
+            View/Edit Context Data
           </button>
         </div>
         {!imageUrl && (
