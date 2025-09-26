@@ -105,6 +105,15 @@ const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidat
     setDrawingNodeId(prevId => (prevId === nodeId ? null : nodeId));
   };
 
+  const handleCapture = () => {
+    if (onCaptureData) {
+      // Capture the enriched node data, which now includes bounding boxes and port locations.
+      // This will overwrite any previous 'nodes' data in the consolidated context.
+      onCaptureData('nodes', nodesForDisplay);
+      onClose(); // Close the modal after capturing.
+    }
+  };
+
   const handleAddPorts = (nodeId) => {
     const node = nodesWithBBoxes.find(n => n.id === nodeId);
     if (!node || !node.bbox || !node.matchedEquipment) {
@@ -399,7 +408,7 @@ const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidat
               <h3 className="font-semibold mb-2">Captured Data (JSON)</h3>
               <div className="flex-grow border-2 border-dashed border-gray-400 p-2 overflow-y-auto bg-gray-50">
                 <pre className="text-xs">
-                  {nodesForDisplay.length > 0 ? JSON.stringify({ equipment_nodes: nodesForDisplay }, null, 2) : 'JSON output will appear here.'}
+                  {nodesForDisplay.length > 0 ? JSON.stringify({ nodes: nodesForDisplay }, null, 2) : 'JSON output will appear here.'}
                 </pre>
               </div>
             </div>
@@ -412,7 +421,8 @@ const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidat
             Close
           </button>
           <button
-            disabled={Object.keys(boxes).length === 0}
+            onClick={handleCapture}
+            disabled={!nodesForDisplay.some(n => n.bbox)}
             className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
             Capture Nodes

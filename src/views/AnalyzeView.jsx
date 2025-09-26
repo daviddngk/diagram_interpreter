@@ -19,6 +19,11 @@ const AnalyzeView = () => {
     handleCaptureToolOutput,
     handleSaveConsolidatedJson,
     setIsEditingConsolidatedJson,
+    isViewingFinalOutput,
+    setIsViewingFinalOutput,
+    finalOutputData,
+    isGeneratingOutput,
+    handleGenerateFinalOutput,
   } = useAnalysis();
 
   // Consume the equipment library context to get the list of equipment
@@ -87,6 +92,8 @@ const AnalyzeView = () => {
             consolidatedData={consolidatedData}
             onCaptureData={handleCaptureToolOutput}
             equipmentLibrary={equipmentList}
+            isGeneratingOutput={isGeneratingOutput}
+            onGenerateFinalOutput={handleGenerateFinalOutput}
             onRequestEditConsolidatedData={handleRequestEditConsolidatedJson}
           />
         </div>
@@ -100,6 +107,19 @@ const AnalyzeView = () => {
                 onSave={handleSaveConsolidatedJson}
                 onCancel={() => setIsEditingConsolidatedJson(false)}
                 toolTitle="Context Data Editor"
+             />
+          </div>
+        </div>
+      )}
+
+      {isViewingFinalOutput && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 z-40 flex justify-center items-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[90vh] flex flex-col">
+             <JsonEditor
+                initialJsonObject={finalOutputData}
+                onSave={() => setIsViewingFinalOutput(false)} // Just close on save
+                onCancel={() => setIsViewingFinalOutput(false)}
+                toolTitle="Final Output"
              />
           </div>
         </div>

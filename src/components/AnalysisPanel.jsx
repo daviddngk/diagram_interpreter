@@ -11,6 +11,8 @@ export default function AnalysisPanel({
   imageUrl,
   equipmentLibrary, // The list of equipment from the library
   consolidatedData, // The entire DiagramIQ data object
+  isGeneratingOutput, // Prop to know if the final output is being generated
+  onGenerateFinalOutput, // Callback to generate the final output
   onCaptureData, // Callback to capture a tool's output into consolidatedData
   onRequestEditConsolidatedData, // Callback to signal App to show the main JsonEditor
 }) {
@@ -26,6 +28,7 @@ export default function AnalysisPanel({
     { title: 'Edge Detection (LLM)', toolId: 'edges' },
     { title: 'Edge Detection (Few Shot LLM)', toolId: 'edges-fewshot' },
     { title: 'Port Match (LLM)', toolId: 'port-match-llm' },
+    { title: 'Edge Matching (CV)', toolId: 'match-edges-cv' },
     // { title: 'Relationship Analysis', toolId: 'relationships' },
   ];
 
@@ -48,19 +51,35 @@ export default function AnalysisPanel({
   // The JsonEditor for individual tools is removed from here.
   // App.jsx will now handle rendering JsonEditor for the consolidatedJsonData.
 
+  // Check for the presence of the required data keys to enable the button.
+  // The keys use underscores as per the logic in AnalysisContext.
+  const canGenerateOutput = 'nodes' in consolidatedData && 'match_edges_cv' in consolidatedData;
+  const generateButtonTooltip = canGenerateOutput ? 'Generate the final schema-compliant output' : 'Requires captured data from "Bounding Box (Manual)" and "Edge Matching (CV)" tools.';
+
   return (
     <div className="h-full w-full flex flex-col bg-gray-50">
       {/* Header for Analysis Tools and Edit Consolidated Data Button */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-xl font-semibold text-gray-800">Analysis Tools</h2>
-          <button
-            onClick={onRequestEditConsolidatedData}
-            className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 text-sm font-medium"
-            aria-label="Edit Context Data"
-          >
-            View/Edit Context Data
-          </button>
+          <div className="flex space-x-2">
+            <button
+              onClick={onRequestEditConsolidatedData}
+              className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 text-sm font-medium"
+              aria-label="Edit Context Data"
+            >
+              View/Edit Context Data
+            </button>
+            <button
+              onClick={onGenerateFinalOutput}
+              disabled={!canGenerateOutput || isGeneratingOutput}
+              className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+              aria-label="Generate Final Output"
+              title={generateButtonTooltip}
+            >
+              {isGeneratingOutput ? 'Generating...' : 'Generate Final Output'}
+            </button>
+          </div>
         </div>
         {!imageUrl && (
           <p className="text-sm text-gray-500 italic">

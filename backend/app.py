@@ -37,6 +37,9 @@ def create_app():
         supports_credentials=True
     )
 
+    # --- JSON Configuration ---
+    app.json.sort_keys = False # Preserve key order in JSON responses
+
     # Load reference material into app config
     load_reference_material(app)
 

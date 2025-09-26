@@ -7,6 +7,7 @@ from google.cloud import storage
 import requests # To fetch image from URL
 from PIL import Image # To open image for OCR/YOLO
 import io # To handle image bytes
+import math # For distance calculation
 import openai # For analyze_diagram_from_url
 import traceback # For detailed error logging
 import json # For potentially parsing LLM response if needed
@@ -38,6 +39,54 @@ os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
 # replaced with a shared store like Redis or a database.
 TRACE_JOBS = {}
 # ----------------------------------------
+
+# --- Helper functions for CV Edge Matching ---
+
+def _calculate_distance(p1, p2):
+    """Calculates the Euclidean distance between two points {x, y}."""
+    return math.sqrt((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)
+
+def _find_closest_port(endpoint_yx, nodes):
+    """
+    Finds the closest port to a given endpoint coordinate across all nodes.
+    Args:
+        endpoint_yx (list): A [y, x] coordinate from the CV tool.
+        nodes (list): A list of node objects.
+    Returns:
+        A dictionary with info about the closest port, or None.
+    """
+    closest_port_info = None
+    min_distance = float('inf')
+    
+    # Convert [y, x] to {x, y} for consistency
+    endpoint_coords = {'x': endpoint_yx[1], 'y': endpoint_yx[0]}
+
+    for node in nodes:
+        if not isinstance(node.get('ports'), list):
+            continue
+            
+        for port in node['ports']:
+            if not isinstance(port.get('location'), dict) or not isinstance(port['location'].get('absolute'), dict):
+                continue
+            
+            port_coords = port['location']['absolute']
+            distance = _calculate_distance(endpoint_coords, port_coords)
+            
+            if distance < min_distance:
+                min_distance = distance
+                closest_port_info = {"equipment_id": str(node.get('id')), "port_id": port.get('label')}
+                
+    return closest_port_info
+
+def _parse_capacity(rate_str):
+    """Helper to parse a rate string like '10/25Gbps' into the max number."""
+    if not isinstance(rate_str, str):
+        return None
+    try:
+        numbers = [int(s) for s in rate_str.replace('Gbps', '').replace('Mbps', '').split('/') if s.isdigit()]
+        return max(numbers) if numbers else None
+    except (ValueError, AttributeError):
+        return None
 
 # --- Route: Generate GCS Signed URL ---
 @services_bp.route("/generate-upload-url", methods=["POST"])
@@ -512,6 +561,125 @@ def handle_port_match_llm():
         print(f"An unexpected error occurred during LLM Port Matching: {e}")
         traceback.print_exc()
         return jsonify({"error": "An unexpected error occurred during Port Matching analysis."}), 500
+
+# --- New Route: Edge Matching (CV) ---
+@services_bp.route('/tools/match-edges-cv', methods=['POST'])
+def handle_edge_matching_cv():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing JSON request body"}), 400
+
+    # This tool requires context from the Bounding Box tool and the Edge Trace tool.
+    nodes_data = data.get('nodes')
+    edge_trace_data = data.get('edge_trace_cv')
+
+    if not nodes_data:
+        return jsonify({"error": "Node data (from Bounding Box tool) is required for matching."}), 400
+    if not edge_trace_data or 'connections' not in edge_trace_data:
+        return jsonify({"error": "Edge Trace (CV) data is required for matching."}), 400
+
+    try:
+        matched_edges = []
+        connections = edge_trace_data.get('connections', [])
+
+        for i, connection in enumerate(connections):
+            start_endpoint = connection.get('start_node')
+            end_endpoint = connection.get('end_node')
+
+            if not start_endpoint or not end_endpoint:
+                continue
+
+            source_match = _find_closest_port(start_endpoint, nodes_data)
+            target_match = _find_closest_port(end_endpoint, nodes_data)
+
+            if source_match and target_match:
+                # Try to infer type and media from the ports
+                source_port_obj = next((p for n in nodes_data if str(n.get('id')) == source_match['equipment_id'] for p in n.get('ports', []) if p.get('label') == source_match['port_id']), None)
+                target_port_obj = next((p for n in nodes_data if str(n.get('id')) == target_match['equipment_id'] for p in n.get('ports', []) if p.get('label') == target_match['port_id']), None)
+                
+                edge_type = "unknown"
+                if source_port_obj and target_port_obj and source_port_obj.get('type') == target_port_obj.get('type'):
+                    edge_type = source_port_obj.get('type') or "unknown"
+                
+                matched_edges.append({
+                    "id": str(connection.get('id', i + 1)),
+                    "type": edge_type,
+                    "media": edge_type,
+                    "source": {"equipment_id": source_match['equipment_id'], "port_id": source_match['port_id']},
+                    "target": {"equipment_id": target_match['equipment_id'], "port_id": target_match['port_id']}
+                })
+        
+        return jsonify({"edges": matched_edges})
+
+    except Exception as e:
+        print(f"An unexpected error occurred during CV Edge Matching: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "An unexpected error occurred during Edge Matching analysis."}), 500
+
+# --- New Route: Generate Final Schema Output ---
+@services_bp.route('/tools/generate-final-output', methods=['POST'])
+def handle_generate_final_output():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing JSON request body"}), 400
+
+    nodes_data = data.get('nodes')
+    edges_data = data.get('match_edges_cv', {}).get('edges')
+    metadata = data.get('diagramIQ_metadata', {})
+
+    if not nodes_data:
+        return jsonify({"error": "Node data is required to generate final output."}), 400
+    if not edges_data:
+        return jsonify({"error": "Edge matching data is required to generate final output."}), 400
+
+    try:
+        final_metadata = {
+            "source_file": metadata.get("originalFileName", "Unknown"),
+            "analysis_timestamp": metadata.get("updatedAt", metadata.get("createdAt", datetime.datetime.utcnow().isoformat()))
+        }
+
+        final_nodes = []
+        # Create a quick lookup map for node labels by ID
+        node_label_map = {str(node.get("id")): node.get("label") for node in nodes_data}
+
+        for node in nodes_data:
+            # Per request, nodes should only have id, label, and library_match
+            transformed_node = {
+                "id": str(node.get("id")),
+                "label": node.get("label")
+            }
+            if node.get("matchedEquipment"):
+                transformed_node["library_match"] = node["matchedEquipment"].get("name")
+            final_nodes.append(transformed_node)
+
+        final_connections = []
+        for edge in edges_data:
+            source_id = str(edge.get("source", {}).get("equipment_id"))
+            target_id = str(edge.get("target", {}).get("equipment_id"))
+
+            final_connections.append({
+                "id": str(edge.get("id")),
+                "media": edge.get("media"),
+                "source": {
+                    "equipment_id": source_id,
+                    "label": node_label_map.get(source_id),
+                    "port_id": edge.get("source", {}).get("port_id")
+                },
+                "target": {
+                    "equipment_id": target_id,
+                    "label": node_label_map.get(target_id),
+                    "port_id": edge.get("target", {}).get("port_id")
+                }
+            })
+
+        # Ensure final output has metadata, nodes, and connections keys in order
+        final_output = {"metadata": final_metadata, "nodes": final_nodes, "connections": final_connections}
+        return jsonify(final_output)
+
+    except Exception as e:
+        print(f"An unexpected error occurred during final output generation: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "An unexpected error occurred during final output generation."}), 500
 
 # --- Route: Diagram Classification ---
 @services_bp.route('/analyze/classify', methods=['POST'])

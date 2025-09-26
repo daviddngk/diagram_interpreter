@@ -40,33 +40,43 @@ export default function AnalysisToolCard({
     setError(null);
     setLatestRunData(null); // Clear previous run data before new run
 
-    try {
-      const analysisUrl = `${API_BASE_URL}/analyze/${toolId}`;
-      const payload = { image_url: imageUrl };
+    let analysisUrl;
+    let payload;
 
-      // Special handling for Port Matcher which needs the whole DiagramIQ
+    if (toolId === 'match-edges-cv') {
+      analysisUrl = `${API_BASE_URL}/tools/match-edges-cv`;
+      payload = {
+        nodes: currentConsolidatedData.nodes,
+        edge_trace_cv: currentConsolidatedData.edge_trace_cv,
+      };
+    } else {
+      if (!imageUrl) {
+        setError("Please upload an image first.");
+        setInternalIsLoading(false);
+        return;
+      }
+      analysisUrl = `${API_BASE_URL}/analyze/${toolId}`;
+      payload = { image_url: imageUrl };
+
       if (toolId === 'port-match-llm') {
         payload.diagram_iq = currentConsolidatedData;
         console.log(`[${title}] Running with DiagramIQ context:`, currentConsolidatedData);
-      }
-      // Add context data if this tool can use it (e.g., few-shot learning)
-      else if (toolId === 'edges-fewshot' || toolId === 'nodes' || toolId === 'edges') { // Or any other tool that might benefit
+      } else if (toolId === 'edges-fewshot' || toolId === 'nodes' || toolId === 'edges') {
         const contextData = {};
         if (currentConsolidatedData?.ocr) {
           contextData.ocr_results = currentConsolidatedData.ocr;
         }
         if (currentConsolidatedData?.nodes) {
-          // For edge detection, nodes are crucial context.
-          // For node detection itself, it might use OCR.
           contextData.node_results = currentConsolidatedData.nodes;
         }
-        // Add other relevant context parts as needed
         if (Object.keys(contextData).length > 0) {
           payload.context_data = contextData;
           console.log(`[${title}] Running with context:`, contextData);
         }
       }
-      
+    }
+    
+    try {
       console.log(`[${title}] Calling analysis endpoint: ${analysisUrl} with payload:`, payload);
       const response = await axios.post(analysisUrl, payload);
       
@@ -93,7 +103,12 @@ export default function AnalysisToolCard({
 
   // Determine which values to use: props if provided, otherwise internal state/defaults.
   const isLoading = isLoadingProp !== undefined ? isLoadingProp : internalIsLoading;
-  const isRunDisabled = isRunDisabledProp !== undefined ? isRunDisabledProp : !imageUrl;
+  let isRunDisabled = isRunDisabledProp !== undefined ? isRunDisabledProp : !imageUrl;
+
+  if (toolId === 'match-edges-cv') {
+    isRunDisabled = !currentConsolidatedData?.nodes || !currentConsolidatedData?.edge_trace_cv;
+  }
+
   const handleRun = onRun || internalRunAnalysis;
 
   return (
