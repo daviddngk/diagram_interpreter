@@ -15,6 +15,7 @@ export default function AnalysisToolCard({
   runButtonText = 'Run', // Optional: Override the button text
   isLoading: isLoadingProp, // Optional: Override the loading state
   isRunDisabled: isRunDisabledProp, // Optional: Override the disabled state
+  reorderControls,
 }) {
   const [internalIsLoading, setInternalIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -114,7 +115,14 @@ export default function AnalysisToolCard({
   return (
     <div className="border rounded-md mb-4 shadow-sm overflow-hidden bg-white">
       <div className="bg-gray-100 p-3 flex justify-between items-center border-b border-gray-200">
-        <h3 className="font-semibold text-gray-700">{title}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-gray-700">{title}</h3>
+          {reorderControls && (
+            <div className="flex items-center gap-1 text-xs text-gray-600">
+              {reorderControls}
+            </div>
+          )}
+        </div>
         <div className="flex items-center space-x-2">
           {showCaptureButton && latestRunData && !error && (
             <button

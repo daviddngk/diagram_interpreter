@@ -1,7 +1,7 @@
 import React from 'react';
 import AnalysisToolCard from './AnalysisToolCard';
 
-const EdgeTraceToolCard = ({ imageFile, onRunTrace }) => {
+const EdgeTraceToolCard = ({ imageFile, onRunTrace, reorderControls }) => {
   const handleRun = () => {
     if (!imageFile) {
       alert('Please upload an image first.');
@@ -20,6 +20,7 @@ const EdgeTraceToolCard = ({ imageFile, onRunTrace }) => {
       isLoading={false} // The loading state will be managed inside the modal
       isRunDisabled={!imageFile}
       showCaptureButton={false} // Capture is handled by the modal
+      reorderControls={reorderControls}
     />
   );
 };

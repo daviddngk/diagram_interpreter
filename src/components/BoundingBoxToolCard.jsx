@@ -1,7 +1,7 @@
 import React from 'react';
 import AnalysisToolCard from './AnalysisToolCard';
 
-const BoundingBoxToolCard = ({ imageUrl, onDraw }) => {
+const BoundingBoxToolCard = ({ imageUrl, onDraw, reorderControls }) => {
   const handleRun = () => {
     if (!imageUrl) {
       alert('Please upload an image first.');
@@ -20,6 +20,7 @@ const BoundingBoxToolCard = ({ imageUrl, onDraw }) => {
       isLoading={false}
       isRunDisabled={!imageUrl}
       showCaptureButton={false}
+      reorderControls={reorderControls}
     />
   );
 };

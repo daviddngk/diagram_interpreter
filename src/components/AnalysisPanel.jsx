@@ -6,6 +6,21 @@ import EdgeTraceModal from './EdgeTraceModal';
 import BoundingBoxModal from './BoundingBoxModal';
 // JsonEditor is no longer invoked directly by AnalysisPanel for individual tools
 
+const TOOL_DEFINITIONS = {
+  classify: { title: 'Classify Diagram', type: 'analysis' },
+  ocr: { title: 'OCR Results', type: 'analysis' },
+  nodes: { title: 'Node Detection (LLM)', type: 'analysis' },
+  edges: { title: 'Edge Detection (LLM)', type: 'analysis' },
+  'edges-fewshot': { title: 'Edge Detection (Few Shot LLM)', type: 'analysis' },
+  'port-match-llm': { title: 'Port Match (LLM)', type: 'analysis' },
+  'match-edges-cv': { title: 'Edge Matching (CV)', type: 'analysis' },
+  'edge-trace': { title: 'Edge Trace (CV)', type: 'edgeTrace' },
+  'bounding-box-manual': { title: 'Bounding Box (Manual)', type: 'boundingBox' },
+};
+
+const DEFAULT_PRIMARY_ORDER = ['classify', 'ocr', 'nodes', 'edges'];
+const DEFAULT_SECONDARY_ORDER = ['edges-fewshot', 'port-match-llm', 'match-edges-cv', 'edge-trace', 'bounding-box-manual'];
+
 export default function AnalysisPanel({
   imageFile, // The raw image file object for local uploads
   imageUrl,
@@ -20,17 +35,37 @@ export default function AnalysisPanel({
   const [isEdgeTraceModalOpen, setIsEdgeTraceModalOpen] = useState(false);
   const [isBoundingBoxModalOpen, setIsBoundingBoxModalOpen] = useState(false);
 
-  // Define the tools. This could also be moved to a constants file.
-  const tools = [
-    { title: 'Classify Diagram', toolId: 'classify' },
-    { title: 'OCR Results', toolId: 'ocr' },
-    { title: 'Node Detection (LLM)', toolId: 'nodes' },
-    { title: 'Edge Detection (LLM)', toolId: 'edges' },
-    { title: 'Edge Detection (Few Shot LLM)', toolId: 'edges-fewshot' },
-    { title: 'Port Match (LLM)', toolId: 'port-match-llm' },
-    { title: 'Edge Matching (CV)', toolId: 'match-edges-cv' },
-    // { title: 'Relationship Analysis', toolId: 'relationships' },
-  ];
+  const [primaryToolIds, setPrimaryToolIds] = useState(() => [...DEFAULT_PRIMARY_ORDER]);
+  const [secondaryToolIds, setSecondaryToolIds] = useState(() => [...DEFAULT_SECONDARY_ORDER]);
+
+  const moveToolWithinSection = (sectionKey, toolId, direction) => {
+    const setSection = sectionKey === 'primary' ? setPrimaryToolIds : setSecondaryToolIds;
+    setSection((prev) => {
+      const index = prev.indexOf(toolId);
+      if (index === -1) {
+        return prev;
+      }
+      const newIndex = index + direction;
+      if (newIndex < 0 || newIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      next.splice(index, 1);
+      next.splice(newIndex, 0, toolId);
+      return next;
+    });
+  };
+
+  const moveToolToSection = (toolId, targetSection) => {
+    setPrimaryToolIds((prev) => {
+      const filtered = prev.filter((id) => id !== toolId);
+      return targetSection === 'primary' ? [...filtered, toolId] : filtered;
+    });
+    setSecondaryToolIds((prev) => {
+      const filtered = prev.filter((id) => id !== toolId);
+      return targetSection === 'secondary' ? [...filtered, toolId] : filtered;
+    });
+  };
 
   const handleRunEdgeTrace = () => {
     if (imageUrl) {
@@ -55,6 +90,114 @@ export default function AnalysisPanel({
   // The keys use underscores as per the logic in AnalysisContext.
   const canGenerateOutput = 'nodes' in consolidatedData && 'match_edges_cv' in consolidatedData;
   const generateButtonTooltip = canGenerateOutput ? 'Generate the final schema-compliant output' : 'Requires captured data from "Bounding Box (Manual)" and "Edge Matching (CV)" tools.';
+
+  const getCapturedDataForTool = (toolId) => {
+    const key = toolId.replaceAll('-', '_');
+    return consolidatedData ? consolidatedData[key] : null;
+  };
+
+  const renderToolCard = (toolId, reorderControls) => {
+    const definition = TOOL_DEFINITIONS[toolId];
+    if (!definition) {
+      return null;
+    }
+
+    if (definition.type === 'analysis') {
+      const capturedData = getCapturedDataForTool(toolId);
+      return (
+        <AnalysisToolCard
+          title={definition.title}
+          toolId={toolId}
+          imageUrl={imageUrl}
+          initiallyCapturedData={capturedData}
+          onCaptureData={onCaptureData}
+          currentConsolidatedData={consolidatedData}
+          reorderControls={reorderControls}
+        />
+      );
+    }
+
+    if (definition.type === 'edgeTrace') {
+      return (
+        <EdgeTraceToolCard
+          imageFile={imageFile}
+          imageUrl={imageUrl}
+          onRunTrace={handleRunEdgeTrace}
+          reorderControls={reorderControls}
+        />
+      );
+    }
+
+    if (definition.type === 'boundingBox') {
+      return (
+        <BoundingBoxToolCard
+          imageUrl={imageUrl}
+          onDraw={handleDrawBoundingBox}
+          reorderControls={reorderControls}
+        />
+      );
+    }
+
+    return null;
+  };
+
+  const renderSectionTools = (sectionKey, toolIds) => {
+    if (!toolIds.length) {
+      return (
+        <p className="text-sm text-gray-500 italic">No tools assigned to this section.</p>
+      );
+    }
+
+    const otherSectionKey = sectionKey === 'primary' ? 'secondary' : 'primary';
+
+    return toolIds.map((toolId, index) => {
+      const moveToOtherIcon = otherSectionKey === 'primary' ? '⤒' : '⤓';
+      const reorderControls = (
+        <>
+          <button
+            type="button"
+            onClick={() => moveToolWithinSection(sectionKey, toolId, -1)}
+            disabled={index === 0}
+            className="h-6 w-6 flex items-center justify-center border border-gray-300 rounded disabled:opacity-40 disabled:cursor-not-allowed hover:border-gray-400 hover:text-gray-800"
+            aria-label="Move up"
+            title="Move up"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            onClick={() => moveToolWithinSection(sectionKey, toolId, 1)}
+            disabled={index === toolIds.length - 1}
+            className="h-6 w-6 flex items-center justify-center border border-gray-300 rounded disabled:opacity-40 disabled:cursor-not-allowed hover:border-gray-400 hover:text-gray-800"
+            aria-label="Move down"
+            title="Move down"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={() => moveToolToSection(toolId, otherSectionKey)}
+            className="h-6 w-6 flex items-center justify-center border border-gray-300 rounded hover:border-gray-400 hover:text-gray-800"
+            aria-label={otherSectionKey === 'primary' ? 'Move to top section' : 'Move to bottom section'}
+            title={otherSectionKey === 'primary' ? 'Move to top section' : 'Move to bottom section'}
+          >
+            {moveToOtherIcon}
+          </button>
+        </>
+      );
+
+      const toolElement = renderToolCard(toolId, reorderControls);
+      if (!toolElement) {
+        return null;
+      }
+
+      return (
+        <div key={toolId} className="mb-4">
+          {toolElement}
+        </div>
+      );
+    });
+  };
 
   return (
     <div className="h-full w-full flex flex-col bg-gray-50">
@@ -88,41 +231,23 @@ export default function AnalysisPanel({
         )}
       </div>
 
-      {/* Scrollable area for tool cards */}
-      <div className="flex-grow overflow-y-auto p-4">
-        {tools.map((tool) => {
-          // Determine the key used in consolidatedData (e.g., 'edges_fewshot' from 'edges-fewshot')
-          const toolDataKey = tool.toolId.replace('-', '_');
-          const capturedDataForThisTool = consolidatedData ? consolidatedData[toolDataKey] : null;
+      {/* Scrollable area for tool cards arranged by sections */}
+      <div className="flex-grow overflow-y-auto p-4 space-y-8">
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-semibold text-gray-800">Flow</h3>
+            <p className="text-xs text-gray-500">Adjust order with the controls beside each tool.</p>
+          </div>
+          {renderSectionTools('primary', primaryToolIds)}
+        </section>
 
-          return (
-            <AnalysisToolCard
-              key={tool.toolId}
-              title={tool.title}
-              toolId={tool.toolId}
-              imageUrl={imageUrl}
-              // Pass the already captured data for this tool (if any) for context or display
-              // The card will primarily manage its own 'latestRunData' for display after a run.
-              initiallyCapturedData={capturedDataForThisTool}
-              onCaptureData={onCaptureData} // Pass the callback to capture data
-              // consolidatedData can be passed if tools need broader context for their "Run" operation
-              // For example, few-shot might need OCR and Node results.
-              // Let's pass the whole thing for now, AnalysisToolCard can decide what to use.
-              currentConsolidatedData={consolidatedData}
-            />
-          );
-        })}
-
-        <EdgeTraceToolCard
-          imageFile={imageFile}
-          imageUrl={imageUrl}
-          onRunTrace={handleRunEdgeTrace}
-        />
-
-        <BoundingBoxToolCard
-          imageUrl={imageUrl}
-          onDraw={handleDrawBoundingBox}
-        />
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-semibold text-gray-800">Stage</h3>
+            <p className="text-xs text-gray-500">Move tools here to stage them separately.</p>
+          </div>
+          {renderSectionTools('secondary', secondaryToolIds)}
+        </section>
       </div>
       <EdgeTraceModal
         isOpen={isEdgeTraceModalOpen}
