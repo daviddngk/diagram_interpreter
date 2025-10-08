@@ -2,6 +2,8 @@
 import os
 import datetime
 import uuid
+import sqlite3
+from typing import Any, Dict, List, Optional
 from flask import request, jsonify, Response, Blueprint, current_app, send_from_directory
 from google.cloud import storage
 import requests # To fetch image from URL
@@ -18,6 +20,7 @@ from services.edge_detector_fewshot_llm import detect_edges_fewshot
 from services.diagram_classifier_engine import classify_diagram_from_url
 from services.edge_trace_engine import execute_next_step
 from services.port_matcher_llm import match_ports_llm
+from services.bounding_box_auto_engine import run_bounding_box_pipeline, BoundingBoxPipelineError
 # ----------------------------------------
 
 # Note: analyze_diagram_from_url is defined locally in this file now
@@ -26,6 +29,8 @@ from services.port_matcher_llm import match_ports_llm
 # --- Create a Blueprint ---
 # This will hold all the service-related routes.
 services_bp = Blueprint('services_bp', __name__)
+
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'equipment_library.db')
 
 # --- Constants for Temp Directory ---
 # This path needs to be accessible from where the app is run.
@@ -38,6 +43,45 @@ os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
 # NOTE: In a production environment with multiple workers, this should be
 # replaced with a shared store like Redis or a database.
 TRACE_JOBS = {}
+
+
+def _load_equipment_records():
+    records = []
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM equipment")
+        for row in cursor.fetchall():
+            records.append({
+                "id": row["id"],
+                "name": row["name"],
+            })
+    except Exception as exc:  # pragma: no cover - logging only
+        current_app.logger.error(f"Failed to load equipment records: {exc}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return records
+
+
+def _match_equipment_label(label: str, equipment_records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not label or not equipment_records:
+        return None
+    lower_label = label.lower()
+    best_match = None
+    best_len = 0
+    for record in equipment_records:
+        name = record.get("name")
+        if not isinstance(name, str):
+            continue
+        lower_name = name.lower()
+        if lower_name in lower_label and len(lower_name) > best_len:
+            best_len = len(lower_name)
+            best_match = record
+    return best_match
 # ----------------------------------------
 
 # --- Helper functions for CV Edge Matching ---
@@ -304,7 +348,55 @@ def handle_node_detection_llm(): # Renamed function for clarity
             print(f"LLM Raw Content: {node_results_json_string}")
             return jsonify({"error": "LLM did not return valid JSON for node detection.", "raw_response": node_results_json_string}), 500
 
-        return jsonify(node_results) # Return the parsed Python object (Flask will serialize it)
+        equipment_records = _load_equipment_records()
+
+        raw_nodes: Any = node_results
+        if isinstance(node_results, dict):
+            if isinstance(node_results.get('equipment_nodes'), list):
+                raw_nodes = node_results['equipment_nodes']
+            elif isinstance(node_results.get('nodes'), list):
+                raw_nodes = node_results['nodes']
+
+        if not isinstance(raw_nodes, list):
+            raw_nodes = []
+
+        processed_nodes = []
+        matched_count = 0
+
+        for idx, item in enumerate(raw_nodes, start=1):
+            if isinstance(item, dict):
+                node_entry = dict(item)
+            else:
+                node_entry = {"label": str(item) if item is not None else ""}
+
+            node_entry.setdefault('id', node_entry.get('id', idx))
+            label = node_entry.get('label')
+            if not isinstance(label, str):
+                label = str(label) if label is not None else ""
+            node_entry['label'] = label
+
+            match = _match_equipment_label(label, equipment_records)
+            if match:
+                matched_count += 1
+                node_entry['matched_equipment'] = match['name']
+                node_entry['matchedEquipment'] = match
+            else:
+                node_entry.setdefault('matched_equipment', None)
+                node_entry.setdefault('matchedEquipment', None)
+
+            processed_nodes.append(node_entry)
+
+        summary = {
+            "total_nodes": len(processed_nodes),
+            "matched_nodes": matched_count,
+        }
+
+        response_payload = {
+            "equipment_nodes": processed_nodes,
+            "summary": summary,
+        }
+
+        return jsonify(response_payload)
 
     # --- Error Handling (similar to /analyze route) ---
     except requests.exceptions.Timeout:
@@ -615,6 +707,85 @@ def handle_edge_matching_cv():
         print(f"An unexpected error occurred during CV Edge Matching: {e}")
         traceback.print_exc()
         return jsonify({"error": "An unexpected error occurred during Edge Matching analysis."}), 500
+
+# --- Route: Automatic Bounding Box Detection ---
+@services_bp.route('/tools/bounding-box-auto', methods=['POST'])
+def run_bounding_box_auto():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image provided."}), 400
+
+    image_file = request.files['image']
+    if not image_file or image_file.filename == '':
+        return jsonify({"error": "Invalid image upload."}), 400
+
+    temp_dir = os.path.join(os.path.dirname(__file__), 'temp')
+    os.makedirs(temp_dir, exist_ok=True)
+
+    _, ext = os.path.splitext(image_file.filename)
+    if not ext:
+        ext = '.png'
+    temp_filename = f"{uuid.uuid4()}_bounding_box_auto{ext}"
+    image_path = os.path.join(temp_dir, temp_filename)
+
+    image_file.save(image_path)
+
+    context_payload = request.form.get('context')
+    existing_nodes = None
+    normalized_nodes = None
+    equipment_library = None
+
+    if context_payload:
+        try:
+            context = json.loads(context_payload)
+            existing_nodes = context.get('existing_nodes')
+            normalized_nodes = context.get('normalized_nodes')
+            raw_nodes = context.get('raw_nodes')
+            equipment_library = context.get('equipment_library')
+
+            def _count_nodes(value):
+                if value is None:
+                    return 0
+                if isinstance(value, list):
+                    return len(value)
+                if isinstance(value, dict):
+                    if isinstance(value.get('nodes'), list):
+                        return len(value['nodes'])
+                    if isinstance(value.get('equipment_nodes'), list):
+                        return len(value['equipment_nodes'])
+                return 0
+
+            raw_count = _count_nodes(raw_nodes)
+            existing_count = _count_nodes(existing_nodes)
+            norm_count = _count_nodes(normalized_nodes)
+            equip_count = len(equipment_library) if isinstance(equipment_library, list) else 0
+
+            current_app.logger.info(
+                "Bounding Box Auto: context received raw=%s existing=%s normalized=%s equipment=%s",
+                raw_count,
+                existing_count,
+                norm_count,
+                equip_count,
+            )
+        except json.JSONDecodeError:
+            current_app.logger.warning('Failed to parse context payload for bounding-box-auto.')
+
+    try:
+        result = run_bounding_box_pipeline(
+            image_path,
+            existing_nodes=normalized_nodes or existing_nodes,
+            equipment_library=equipment_library,
+        )
+        return jsonify(result)
+    except BoundingBoxPipelineError as exc:
+        current_app.logger.error(f"Bounding box pipeline error: {exc}")
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - unexpected failures
+        current_app.logger.error(
+            f"Unexpected error during bounding box automation: {exc}",
+            exc_info=True
+        )
+        return jsonify({"error": "An unexpected error occurred during automatic bounding box detection."}), 500
+
 
 # --- New Route: Generate Final Schema Output ---
 @services_bp.route('/tools/generate-final-output', methods=['POST'])

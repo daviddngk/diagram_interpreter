@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import AnalysisToolCard from './AnalysisToolCard';
 import EdgeTraceToolCard from './EdgeTraceToolCard';
 import BoundingBoxToolCard from './BoundingBoxToolCard';
+import BoundingBoxAutoToolCard from './BoundingBoxAutoToolCard';
 import EdgeTraceModal from './EdgeTraceModal';
 import BoundingBoxModal from './BoundingBoxModal';
 // JsonEditor is no longer invoked directly by AnalysisPanel for individual tools
@@ -14,11 +15,12 @@ const TOOL_DEFINITIONS = {
   'edges-fewshot': { title: 'Edge Detection (Few Shot LLM)', type: 'analysis' },
   'port-match-llm': { title: 'Port Match (LLM)', type: 'analysis' },
   'match-edges-cv': { title: 'Edge Matching (CV)', type: 'analysis' },
+  'bounding-box-auto': { title: 'Bounding Box (Auto)', type: 'autoBoundingBox' },
   'edge-trace': { title: 'Edge Trace (CV)', type: 'edgeTrace' },
   'bounding-box-manual': { title: 'Bounding Box (Manual)', type: 'boundingBox' },
 };
 
-const DEFAULT_PRIMARY_ORDER = ['classify', 'ocr', 'nodes', 'edges'];
+const DEFAULT_PRIMARY_ORDER = ['classify', 'ocr', 'nodes', 'edges', 'bounding-box-auto'];
 const DEFAULT_SECONDARY_ORDER = ['edges-fewshot', 'port-match-llm', 'match-edges-cv', 'edge-trace', 'bounding-box-manual'];
 
 export default function AnalysisPanel({
@@ -123,6 +125,19 @@ export default function AnalysisPanel({
           imageFile={imageFile}
           imageUrl={imageUrl}
           onRunTrace={handleRunEdgeTrace}
+          reorderControls={reorderControls}
+        />
+      );
+    }
+
+    if (definition.type === 'autoBoundingBox') {
+      return (
+        <BoundingBoxAutoToolCard
+          imageFile={imageFile}
+          imageUrl={imageUrl}
+          onCaptureData={onCaptureData}
+          currentConsolidatedData={consolidatedData}
+          equipmentLibrary={equipmentLibrary}
           reorderControls={reorderControls}
         />
       );

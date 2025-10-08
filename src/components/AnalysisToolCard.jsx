@@ -16,6 +16,9 @@ export default function AnalysisToolCard({
   isLoading: isLoadingProp, // Optional: Override the loading state
   isRunDisabled: isRunDisabledProp, // Optional: Override the disabled state
   reorderControls,
+  captureKey,
+  captureTransform,
+  additionalRunActions = [],
 }) {
   const [internalIsLoading, setInternalIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -95,7 +98,13 @@ export default function AnalysisToolCard({
 
   const handleCapture = () => {
     if (latestRunData && onCaptureData) {
-      onCaptureData(toolId, latestRunData);
+      const targetKey = captureKey || toolId;
+      const payload = captureTransform ? captureTransform(latestRunData) : latestRunData;
+      if (payload === undefined) {
+        console.warn(`[${title}] Capture skipped because transform returned undefined.`);
+        return;
+      }
+      onCaptureData(targetKey, payload);
       // Optionally, provide feedback to the user that data has been captured.
       // e.g., a temporary message or change in button appearance.
       console.log(`[${title}] Data captured to DiagramIQ.`);
@@ -110,7 +119,33 @@ export default function AnalysisToolCard({
     isRunDisabled = !currentConsolidatedData?.nodes || !currentConsolidatedData?.edge_trace_cv;
   }
 
-  const handleRun = onRun || internalRunAnalysis;
+  const executeRun = useCallback(async (runner) => {
+    setInternalIsLoading(true);
+    setError(null);
+    setLatestRunData(null);
+    try {
+      const result = await runner();
+      if (result !== undefined) {
+        setLatestRunData(result);
+        setIsExpanded(true);
+      }
+    } catch (err) {
+      console.error(`Error running ${title} analysis:`, err);
+      const backendErrorMessage = err?.response?.data?.error || err?.response?.data?.message;
+      setError(backendErrorMessage || err?.message || `Failed to run ${title} analysis.`);
+      setIsExpanded(true);
+    } finally {
+      setInternalIsLoading(false);
+    }
+  }, [title]);
+
+  const handleRun = useCallback(async () => {
+    if (onRun) {
+      await executeRun(onRun);
+      return;
+    }
+    await executeRun(internalRunAnalysis);
+  }, [onRun, internalRunAnalysis, executeRun]);
 
   return (
     <div className="border rounded-md mb-4 shadow-sm overflow-hidden bg-white">
@@ -124,6 +159,16 @@ export default function AnalysisToolCard({
           )}
         </div>
         <div className="flex items-center space-x-2">
+          {additionalRunActions.map(({ label, onRun: actionRun, disabled }) => (
+            <button
+              key={label}
+              onClick={() => executeRun(actionRun)}
+              disabled={isLoading || internalIsLoading || isRunDisabled || disabled}
+              className="px-3 py-1 text-xs bg-slate-500 text-white rounded hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
+            >
+              {label}
+            </button>
+          ))}
           {showCaptureButton && latestRunData && !error && (
             <button
               onClick={handleCapture}
