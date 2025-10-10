@@ -73,6 +73,7 @@ export default function BoundingBoxAutoToolCard({
         const contextPayload = {
           existing_nodes: existingNodesList,
           raw_nodes: rawNodes,
+          diagram_context: currentConsolidatedData || {},
           equipment_library: equipmentLibrary || [],
         };
 
@@ -131,7 +132,7 @@ export default function BoundingBoxAutoToolCard({
         pendingResultRef.current = null;
       }
     });
-  }, [imageFile, closeModal]);
+  }, [imageFile, closeModal, currentConsolidatedData, equipmentLibrary]);
 
   const handleModalClose = useCallback(() => {
     closeModal();

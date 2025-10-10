@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import difflib
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any, Optional
 
@@ -125,7 +126,22 @@ def _normalize_nodes(nodes: Optional[Any]) -> List[Dict[str, Any]]:
 
 
 def _tokenize(text: str) -> List[str]:
-    return [token for token in re.split(r'[^a-z0-9]+', text.lower()) if token]
+    base_tokens = [token for token in re.split(r'[^a-z0-9]+', text.lower()) if token]
+    if not base_tokens:
+        return []
+
+    enriched_tokens: List[str] = []
+    for token in base_tokens:
+        if token not in enriched_tokens:
+            enriched_tokens.append(token)
+
+        if any(ch.isalpha() for ch in token) and any(ch.isdigit() for ch in token):
+            # Split mixed alphanumeric strings like "p101" into ["p", "101"]
+            for sub_token in re.findall(r'[a-z]+|\d+', token):
+                if sub_token and sub_token not in enriched_tokens:
+                    enriched_tokens.append(sub_token)
+
+    return enriched_tokens
 
 
 def _text_similarity(label: str, candidate_text: str) -> float:
@@ -134,11 +150,16 @@ def _text_similarity(label: str, candidate_text: str) -> float:
     label_tokens = _tokenize(label)
     candidate_tokens = _tokenize(candidate_text)
     if not label_tokens or not candidate_tokens:
-        return 0.0
-    intersection = set(label_tokens) & set(candidate_tokens)
-    if not intersection:
-        return 0.0
-    return len(intersection) / max(len(label_tokens), len(candidate_tokens))
+        token_score = 0.0
+    else:
+        intersection = set(label_tokens) & set(candidate_tokens)
+        token_score = len(intersection) / max(len(label_tokens), len(candidate_tokens)) if intersection else 0.0
+
+    normalized_label = re.sub(r'[^a-z0-9]+', '', label.lower())
+    normalized_candidate = re.sub(r'[^a-z0-9]+', '', candidate_text.lower())
+    seq_score = difflib.SequenceMatcher(None, normalized_label, normalized_candidate).ratio() if normalized_label and normalized_candidate else 0.0
+
+    return max(token_score, seq_score)
 
 
 def run_bounding_box_pipeline(
@@ -158,20 +179,16 @@ def run_bounding_box_pipeline(
         "image_url": _save_step_image(original, "original"),
     })
 
-    # Step 2: isolate pure white pixels
-    white_mask = np.all(original == [255, 255, 255], axis=-1)
-    bw_pixels = np.zeros_like(original)
-    bw_pixels[white_mask] = 255
-    steps.append({
-        "name": "White-only Mask",
-        "image_url": _save_step_image(bw_pixels, "white_mask"),
-    })
-
-    # Step 3: remove text regions using OCR
+    # Step 2: extract OCR text candidates and prepare mask
     text_candidates = _extract_text_candidates(original)
+    text_mask = np.zeros(original.shape[:2], dtype=np.uint8)
     text_overlay = cv2.cvtColor(original.copy(), cv2.COLOR_RGB2BGR)
     for candidate in text_candidates:
         bbox = candidate["bbox"]
+        x_min, y_min = bbox["x"], bbox["y"]
+        x_max = x_min + bbox["width"]
+        y_max = y_min + bbox["height"]
+        text_mask[y_min:y_max, x_min:x_max] = 255
         cv2.rectangle(
             text_overlay,
             (bbox["x"], bbox["y"]),
@@ -190,25 +207,88 @@ def run_bounding_box_pipeline(
             cv2.LINE_AA,
         )
 
-    text_overlay_rgb = cv2.cvtColor(text_overlay, cv2.COLOR_BGR2RGB)
     steps.append({
         "name": "OCR Text Candidates",
-        "image_url": _save_step_image(text_overlay_rgb, "ocr_candidates"),
+        "image_url": _save_step_image(cv2.cvtColor(text_overlay, cv2.COLOR_BGR2RGB), "ocr_candidates"),
     })
 
-    textless = bw_pixels.copy()
-    for candidate in text_candidates:
+    source_nodes = _normalize_nodes(existing_nodes)
+    text_match_threshold = 0.3
+    available_text_candidates = list(text_candidates)
+    node_match_results: List[Tuple[Dict[str, Any], Optional[Dict[str, Any]], float]] = []
+
+    matched_overlay = cv2.cvtColor(original.copy(), cv2.COLOR_RGB2BGR)
+
+    for node in source_nodes:
+        label = node.get('label') or ''
+        best_candidate: Optional[Dict[str, Any]] = None
+        best_score = 0.0
+        for candidate in available_text_candidates:
+            candidate_text = candidate['text']
+            score = _text_similarity(label, candidate_text)
+            if label.lower() in candidate_text.lower() or candidate_text.lower() in label.lower():
+                score = max(score, 0.6)
+            if score > best_score:
+                best_score = score
+                best_candidate = candidate
+
+        if best_candidate and best_score >= text_match_threshold:
+            node_match_results.append((node, best_candidate, best_score))
+            available_text_candidates.remove(best_candidate)
+            best_candidate['_node_match'] = {
+                "node_id": node.get('id'),
+                "label": label,
+                "score": best_score,
+            }
+        else:
+            node_match_results.append((node, None, best_score))
+
+    for node, candidate, _ in node_match_results:
+        if not candidate:
+            continue
         bbox = candidate["bbox"]
-        x_min, y_min = bbox["x"], bbox["y"]
-        x_max = x_min + bbox["width"]
-        y_max = y_min + bbox["height"]
-        textless[y_min:y_max, x_min:x_max] = 255
+        cv2.rectangle(
+            matched_overlay,
+            (bbox["x"], bbox["y"]),
+            (bbox["x"] + bbox["width"], bbox["y"] + bbox["height"]),
+            (0, 255, 0),
+            2,
+        )
+        overlay_label = (node.get('label') or candidate["text"])[:24]
+        cv2.putText(
+            matched_overlay,
+            overlay_label,
+            (bbox["x"], max(0, bbox["y"] - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
+    steps.append({
+        "name": "OCR Node Labels",
+        "image_url": _save_step_image(cv2.cvtColor(matched_overlay, cv2.COLOR_BGR2RGB), "ocr_node_labels"),
+    })
+
+    # Step 3: isolate pure white pixels
+    white_mask = np.all(original == [255, 255, 255], axis=-1)
+    bw_pixels = np.zeros_like(original)
+    bw_pixels[white_mask] = 255
+    steps.append({
+        "name": "White-only Mask",
+        "image_url": _save_step_image(bw_pixels, "white_mask"),
+    })
+
+    # Step 4: remove text regions using prepared mask
+    textless = bw_pixels.copy()
+    textless[text_mask == 255] = 255
     steps.append({
         "name": "Text Removed",
         "image_url": _save_step_image(textless, "text_removed"),
     })
 
-    # Step 4: morphology to clean shapes
+    # Step 5: morphology to clean shapes
     binary = textless[:, :, 0]
     inverted = cv2.bitwise_not(binary)
     kernel = np.ones((3, 3), dtype=np.uint8)
@@ -220,7 +300,7 @@ def run_bounding_box_pipeline(
         "image_url": _save_step_image(cv2.cvtColor(cleaned, cv2.COLOR_GRAY2RGB), "morphology"),
     })
 
-    # Step 5: find contours and compute bounding boxes
+    # Step 6: find contours and compute bounding boxes
     contours, _ = cv2.findContours(cleaned.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     boxes: List[Dict[str, int]] = []
     bbox_vis = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR)
@@ -247,40 +327,22 @@ def run_bounding_box_pipeline(
     def _center(bbox: Dict[str, int]) -> Tuple[float, float]:
         return (bbox["x"] + bbox["width"] / 2.0, bbox["y"] + bbox["height"] / 2.0)
 
-    matched_nodes = []
-    source_nodes = _normalize_nodes(existing_nodes)
     remaining_existing = []
 
     debug_messages.append(
         f"Source nodes provided: {len(source_nodes)} | Equipment records: {len(equipment_library or [])} | OCR candidates: {len(text_candidates)}"
     )
 
-    available_text_candidates = text_candidates.copy()
-    text_match_threshold = 0.3
-
-    for node in source_nodes:
+    for node, candidate, best_score in node_match_results:
         label = node.get('label') or ''
-        best_candidate = None
-        best_score = 0.0
-        for candidate in available_text_candidates:
-            candidate_text = candidate['text']
-            score = _text_similarity(label, candidate_text)
-            if label.lower() in candidate_text.lower() or candidate_text.lower() in label.lower():
-                score = max(score, 0.6)
-            if score > best_score:
-                best_score = score
-                best_candidate = candidate
-
-        if best_candidate and best_score >= text_match_threshold:
-            node_with_bbox = dict(node)
-            node_with_bbox['bbox'] = best_candidate['bbox']
+        node_with_bbox = dict(node)
+        if candidate:
+            node_with_bbox['bbox'] = candidate['bbox']
             remaining_existing.append(node_with_bbox)
-            available_text_candidates.remove(best_candidate)
             debug_messages.append(
-                f"Node '{label}' matched to OCR text '{best_candidate['text']}' (score={best_score:.2f})"
+                f"Node '{label}' matched to OCR text '{candidate['text']}' (score={best_score:.2f})"
             )
         else:
-            node_with_bbox = dict(node)
             if 'bbox' not in node_with_bbox:
                 node_with_bbox['bbox'] = None
             remaining_existing.append(node_with_bbox)
@@ -316,8 +378,11 @@ def run_bounding_box_pipeline(
 
             node_bbox = best_node.get('bbox')
             if not node_bbox or any(node_bbox.get(key) is None for key in ('x', 'y', 'width', 'height')):
+                label = best_node.get('label') or label
+                matched_equipment = best_node.get('matchedEquipment')
+                remaining_existing = [n for n in remaining_existing if n is not best_node]
                 debug_messages.append(
-                    f"Box {idx}: nearest node '{best_node.get('label')}' missing bbox data; skipping positional match"
+                    f"Box {idx}: nearest node '{best_node.get('label')}' missing bbox data; assigning label fallback"
                 )
             else:
                 node_center = _center({
@@ -333,14 +398,16 @@ def run_bounding_box_pipeline(
                 if distance <= threshold:
                     label = best_node.get('label') or label
                     matched_equipment = best_node.get('matchedEquipment')
-                    best_id = best_node.get('id')
-                    remaining_existing = [n for n in remaining_existing if n.get('id') != best_id]
+                    remaining_existing = [n for n in remaining_existing if n is not best_node]
                     debug_messages.append(
                         f"Box {idx}: matched to existing node '{label}' (distance={distance:.1f}, threshold={threshold:.1f})"
                     )
                 else:
+                    label = best_node.get('label') or label
+                    matched_equipment = best_node.get('matchedEquipment')
+                    remaining_existing = [n for n in remaining_existing if n is not best_node]
                     debug_messages.append(
-                        f"Box {idx}: nearest existing node '{best_node.get('label')}' too far (distance={distance:.1f}, threshold={threshold:.1f})"
+                        f"Box {idx}: nearest existing node '{best_node.get('label')}' too far (distance={distance:.1f}, threshold={threshold:.1f}); assigning fallback label"
                     )
         else:
             debug_messages.append(f"Box {idx}: no existing nodes available for matching")
@@ -376,8 +443,8 @@ def run_bounding_box_pipeline(
     )
 
     return {
-        "steps": steps,
         "nodes": matched_nodes,
+        "steps": steps,
         "summary": summary,
         "debug_messages": debug_messages,
     }

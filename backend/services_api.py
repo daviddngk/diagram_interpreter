@@ -4,6 +4,7 @@ import datetime
 import uuid
 import sqlite3
 from typing import Any, Dict, List, Optional
+import re
 from flask import request, jsonify, Response, Blueprint, current_app, send_from_directory
 from google.cloud import storage
 import requests # To fetch image from URL
@@ -71,8 +72,10 @@ def _match_equipment_label(label: str, equipment_records: List[Dict[str, Any]]) 
     if not label or not equipment_records:
         return None
     lower_label = label.lower()
+    label_tokens = set(re.findall(r"[a-z0-9]+", lower_label))
     best_match = None
     best_len = 0
+    best_overlap = 0.0
     for record in equipment_records:
         name = record.get("name")
         if not isinstance(name, str):
@@ -80,6 +83,16 @@ def _match_equipment_label(label: str, equipment_records: List[Dict[str, Any]]) 
         lower_name = name.lower()
         if lower_name in lower_label and len(lower_name) > best_len:
             best_len = len(lower_name)
+            best_match = record
+            continue
+        if not label_tokens:
+            continue
+        name_tokens = set(re.findall(r"[a-z0-9]+", lower_name))
+        if not name_tokens:
+            continue
+        overlap = len(label_tokens & name_tokens) / len(name_tokens)
+        if overlap >= 0.75 and overlap > best_overlap:
+            best_overlap = overlap
             best_match = record
     return best_match
 # ----------------------------------------
@@ -311,6 +324,7 @@ def handle_node_detection_llm(): # Renamed function for clarity
             "content": (
                 "You are an expert system analyzing engineering diagrams (like P&IDs or flowcharts). "
                 "Your task is to identify distinct equipment nodes or components shown in the diagram. "
+                "Do not return text blocks or text labels that are not clearly associated with equipment nodes, for example text associated with headings or legends. "
                 "List each identified node with a brief label or description. "
                 "Format the output as a JSON list of objects, where each object has a 'id' (sequential number starting from 1) and a 'label' (the identified node description)."
                 "Example Output: [{'id': 1, 'label': 'Pump P-101'}, {'id': 2, 'label': 'Heat Exchanger E-203'}, {'id': 3, 'label': 'Storage Tank T-50'}]"
@@ -733,6 +747,7 @@ def run_bounding_box_auto():
     existing_nodes = None
     normalized_nodes = None
     equipment_library = None
+    diagram_context = None
 
     if context_payload:
         try:
@@ -741,6 +756,7 @@ def run_bounding_box_auto():
             normalized_nodes = context.get('normalized_nodes')
             raw_nodes = context.get('raw_nodes')
             equipment_library = context.get('equipment_library')
+            diagram_context = context.get('diagram_context')
 
             def _count_nodes(value):
                 if value is None:
@@ -758,21 +774,49 @@ def run_bounding_box_auto():
             existing_count = _count_nodes(existing_nodes)
             norm_count = _count_nodes(normalized_nodes)
             equip_count = len(equipment_library) if isinstance(equipment_library, list) else 0
+            context_count = 0
+            if isinstance(diagram_context, dict):
+                context_count = _count_nodes(diagram_context.get('nodes') or diagram_context.get('equipment_nodes'))
+            elif isinstance(diagram_context, list):
+                context_count = len(diagram_context)
 
             current_app.logger.info(
-                "Bounding Box Auto: context received raw=%s existing=%s normalized=%s equipment=%s",
+                "Bounding Box Auto: context received raw=%s existing=%s normalized=%s context=%s equipment=%s",
                 raw_count,
                 existing_count,
                 norm_count,
+                context_count,
                 equip_count,
             )
         except json.JSONDecodeError:
             current_app.logger.warning('Failed to parse context payload for bounding-box-auto.')
 
     try:
+        nodes_source = normalized_nodes or existing_nodes or raw_nodes
+        if not nodes_source and diagram_context:
+            context_nodes = diagram_context.get('nodes')
+            if context_nodes:
+                nodes_source = context_nodes
+            elif isinstance(diagram_context, dict):
+                if isinstance(diagram_context.get('equipment_nodes'), list):
+                    nodes_source = diagram_context['equipment_nodes']
+
+        node_source_len = 0
+        if isinstance(nodes_source, list):
+            node_source_len = len(nodes_source)
+        elif isinstance(nodes_source, dict):
+            if isinstance(nodes_source.get('nodes'), list):
+                node_source_len = len(nodes_source['nodes'])
+            if isinstance(nodes_source.get('equipment_nodes'), list):
+                node_source_len = max(node_source_len, len(nodes_source['equipment_nodes']))
+
+        current_app.logger.info(
+            "Bounding Box Auto: final node source type=%s length=%s", type(nodes_source).__name__, node_source_len
+        )
+
         result = run_bounding_box_pipeline(
             image_path,
-            existing_nodes=normalized_nodes or existing_nodes,
+            existing_nodes=nodes_source,
             equipment_library=equipment_library,
         )
         return jsonify(result)

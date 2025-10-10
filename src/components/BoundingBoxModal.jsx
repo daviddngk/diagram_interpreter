@@ -1,32 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 
-/**
- * Finds the best equipment match from the library for a given node label.
- * It prefers the longest equipment name that is a substring of the label.
- * @param {string} label The label from the detected node (e.g., "Baseband 6630 LTE").
- * @param {Array} equipmentLibrary The list of equipment from the database.
- * @returns {Object|null} The best matching equipment object or null.
- */
-const findBestMatch = (label, equipmentLibrary) => {
-  if (!label || !equipmentLibrary || equipmentLibrary.length === 0) {
-    return null;
-  }
-
-  let bestMatch = null;
-  let maxMatchLength = 0;
-  const lowerLabel = label.toLowerCase();
-
-  for (const equipment of equipmentLibrary) {
-    const lowerName = equipment.name.toLowerCase();
-    if (lowerLabel.includes(lowerName) && lowerName.length > maxMatchLength) {
-      bestMatch = equipment;
-      maxMatchLength = lowerName.length;
-    }
-  }
-
-  return bestMatch;
-};
-
 const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidatedData, equipmentLibrary = [] }) => {
   const [drawingNodeId, setDrawingNodeId] = useState(null);
   const [boxes, setBoxes] = useState({}); // Stores drawn boxes: { [nodeId]: { x, y, width, height } } in ABSOLUTE PIXELS
@@ -77,10 +50,35 @@ const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidat
 
   // Use useMemo to avoid re-calculating the matches on every render.
   const matchedNodes = useMemo(() => {
-    return nodes.map(node => ({
-      ...node,
-      matchedEquipment: findBestMatch(node.label, equipmentLibrary),
-    }));
+    return nodes.map(node => {
+      const contextMatch = node.matchedEquipment || node.matched_equipment || null;
+
+      let resolvedMatch = contextMatch || null;
+      if (resolvedMatch && Array.isArray(equipmentLibrary) && equipmentLibrary.length > 0) {
+        const matchId = resolvedMatch.id ?? resolvedMatch.equipment_id ?? null;
+        let libraryMatch = null;
+
+        if (matchId !== null && matchId !== undefined) {
+          libraryMatch = equipmentLibrary.find(item => item.id === matchId);
+        }
+
+        if (!libraryMatch && resolvedMatch?.name) {
+          const lowerName = resolvedMatch.name.toLowerCase();
+          libraryMatch = equipmentLibrary.find(
+            item => typeof item.name === 'string' && item.name.toLowerCase() === lowerName
+          );
+        }
+
+        if (libraryMatch) {
+          resolvedMatch = libraryMatch;
+        }
+      }
+
+      return {
+        ...node,
+        matchedEquipment: resolvedMatch,
+      };
+    });
   }, [nodes, equipmentLibrary]);
 
   // Combine matched nodes with their bounding boxes for a unified view
