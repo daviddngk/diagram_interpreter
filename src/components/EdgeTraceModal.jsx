@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const API_BASE_URL = "http://localhost:5000";
 
-const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData }) => {
+const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, mode, onResult }) => {
   const [status, setStatus] = useState('Waiting to start...');
   const [step, setStep] = useState(0);
   const [totalSteps, setTotalSteps] = useState(0);
@@ -13,6 +13,8 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
   const [error, setError] = useState(null);
   const [jobId, setJobId] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isAutoPlaying, setIsAutoPlaying] = useState(false);
+  const autoPlayTimeoutRef = useRef(null);
 
   const resetState = () => {
     setStatus('Waiting to start...');
@@ -25,7 +27,18 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
     setError(null);
     setJobId(null);
     setIsProcessing(false);
+    setIsAutoPlaying(false);
+    if (autoPlayTimeoutRef.current) {
+      clearTimeout(autoPlayTimeoutRef.current);
+      autoPlayTimeoutRef.current = null;
+    }
   };
+
+  useEffect(() => {
+    if (!isOpen) {
+      resetState();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -34,14 +47,13 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
 
     const initiateTrace = async () => {
       resetState();
-      setIsProcessing(true); // Show a loading state initially
+      setIsProcessing(true);
       try {
         const formData = new FormData();
         formData.append('image', imageFile);
 
         const initiateResponse = await fetch(`${API_BASE_URL}/tools/edge-trace/initiate`, {
           method: 'POST',
-          // Do NOT set the Content-Type header for FormData; the browser does it automatically with the correct boundary.
           body: formData,
         });
 
@@ -52,7 +64,10 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
 
         const { job_id } = await initiateResponse.json();
         setJobId(job_id);
-        setStatus('Ready to start. Click "Run Next Step".');
+        setStatus(mode === 'auto' ? 'Ready to start automatic trace.' : 'Ready to start. Click "Run Next Step".');
+        if (mode === 'auto') {
+          setIsAutoPlaying(true);
+        }
       } catch (err) {
         console.error("Failed to initiate trace process:", err);
         setError(err.message);
@@ -62,7 +77,7 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
     };
 
     initiateTrace();
-  }, [isOpen, imageFile]); // Depend on imageFile, not the unused imageUrl
+  }, [isOpen, imageFile, imageUrl, mode]);
 
   const handleRunNextStep = async () => {
     if (!jobId || isProcessing || isComplete) return;
@@ -94,21 +109,55 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
         setIsComplete(true);
         setFinalJson(data.final_json);
         setStatus(data.message);
+        setIsAutoPlaying(false);
+        if (typeof onResult === 'function') {
+          onResult(data.final_json);
+        }
       }
     } catch (err) {
       console.error("Error during step execution:", err);
       setError(err.message);
+      setIsAutoPlaying(false);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleAppend = () => {
-    if (finalJson) {
-      onCaptureData('edge_trace_cv', finalJson);
-      onClose(); // Close modal after appending
+  useEffect(() => {
+    if (!isOpen || !isAutoPlaying) {
+      if (autoPlayTimeoutRef.current) {
+        clearTimeout(autoPlayTimeoutRef.current);
+        autoPlayTimeoutRef.current = null;
+      }
+      return;
     }
-  };
+
+    if (isComplete || error) {
+      setIsAutoPlaying(false);
+      return;
+    }
+
+    if (!isProcessing && jobId) {
+      autoPlayTimeoutRef.current = setTimeout(() => {
+        handleRunNextStep().catch(() => setIsAutoPlaying(false));
+      }, 500);
+    }
+
+    return () => {
+      if (autoPlayTimeoutRef.current) {
+        clearTimeout(autoPlayTimeoutRef.current);
+        autoPlayTimeoutRef.current = null;
+      }
+    };
+  }, [isOpen, isAutoPlaying, isProcessing, isComplete, error, jobId, step]);
+
+  useEffect(() => {
+    return () => {
+      if (autoPlayTimeoutRef.current) {
+        clearTimeout(autoPlayTimeoutRef.current);
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -118,12 +167,21 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
     return 'Run Next Step';
   };
 
+  const handleClose = () => {
+    setIsAutoPlaying(false);
+    if (autoPlayTimeoutRef.current) {
+      clearTimeout(autoPlayTimeoutRef.current);
+      autoPlayTimeoutRef.current = null;
+    }
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-75 z-40 flex justify-center items-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[90vh] flex flex-col">
         <div className="flex justify-between items-center p-4 border-b">
           <h2 className="text-xl font-semibold">Edge Trace Progress</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+          <button onClick={handleClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
         </div>
 
         <div className="flex-grow p-4 overflow-y-auto grid grid-cols-1 gap-4">
@@ -158,7 +216,7 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
           <div>
             <button
               onClick={handleRunNextStep}
-              disabled={isProcessing || isComplete || !jobId}
+              disabled={isProcessing || isComplete || !jobId || isAutoPlaying}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {nextStepButtonText()}
@@ -166,17 +224,10 @@ const EdgeTraceModal = ({ isOpen, onClose, imageFile, imageUrl, onCaptureData })
           </div>
           <div className="flex space-x-2">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600"
             >
               Close
-            </button>
-            <button
-              onClick={handleAppend}
-              disabled={!isComplete}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              Append to Diagram Intelligence
             </button>
           </div>
         </div>

@@ -3,7 +3,6 @@ import AnalysisToolCard from './AnalysisToolCard';
 import EdgeTraceToolCard from './EdgeTraceToolCard';
 import BoundingBoxToolCard from './BoundingBoxToolCard';
 import BoundingBoxAutoToolCard from './BoundingBoxAutoToolCard';
-import EdgeTraceModal from './EdgeTraceModal';
 import BoundingBoxModal from './BoundingBoxModal';
 // JsonEditor is no longer invoked directly by AnalysisPanel for individual tools
 
@@ -20,8 +19,8 @@ const TOOL_DEFINITIONS = {
   'bounding-box-manual': { title: 'Bounding Box (Manual)', type: 'boundingBox' },
 };
 
-const DEFAULT_PRIMARY_ORDER = ['classify', 'ocr', 'nodes', 'edges', 'bounding-box-auto'];
-const DEFAULT_SECONDARY_ORDER = ['edges-fewshot', 'port-match-llm', 'match-edges-cv', 'edge-trace', 'bounding-box-manual'];
+const DEFAULT_PRIMARY_ORDER = ['classify', 'nodes', 'bounding-box-auto', 'edge-trace', 'match-edges-cv'];
+const DEFAULT_SECONDARY_ORDER = ['bounding-box-manual', 'edges', 'edges-fewshot', 'ocr', 'port-match-llm'];
 
 export default function AnalysisPanel({
   imageFile, // The raw image file object for local uploads
@@ -33,8 +32,7 @@ export default function AnalysisPanel({
   onCaptureData, // Callback to capture a tool's output into consolidatedData
   onRequestEditConsolidatedData, // Callback to signal App to show the main JsonEditor
 }) {
-  // State for the Edge Trace modal
-  const [isEdgeTraceModalOpen, setIsEdgeTraceModalOpen] = useState(false);
+  // State for the manual Bounding Box modal
   const [isBoundingBoxModalOpen, setIsBoundingBoxModalOpen] = useState(false);
 
   const [primaryToolIds, setPrimaryToolIds] = useState(() => [...DEFAULT_PRIMARY_ORDER]);
@@ -67,12 +65,6 @@ export default function AnalysisPanel({
       const filtered = prev.filter((id) => id !== toolId);
       return targetSection === 'secondary' ? [...filtered, toolId] : filtered;
     });
-  };
-
-  const handleRunEdgeTrace = () => {
-    if (imageUrl) {
-      setIsEdgeTraceModalOpen(true);
-    }
   };
 
   const handleDrawBoundingBox = () => {
@@ -124,7 +116,8 @@ export default function AnalysisPanel({
         <EdgeTraceToolCard
           imageFile={imageFile}
           imageUrl={imageUrl}
-          onRunTrace={handleRunEdgeTrace}
+          onCaptureData={onCaptureData}
+          currentConsolidatedData={consolidatedData}
           reorderControls={reorderControls}
         />
       );
@@ -264,13 +257,6 @@ export default function AnalysisPanel({
           {renderSectionTools('secondary', secondaryToolIds)}
         </section>
       </div>
-      <EdgeTraceModal
-        isOpen={isEdgeTraceModalOpen}
-        onClose={() => setIsEdgeTraceModalOpen(false)}
-        imageFile={imageFile}
-        imageUrl={imageUrl}
-        onCaptureData={onCaptureData}
-      />
       <BoundingBoxModal
         isOpen={isBoundingBoxModalOpen}
         onClose={() => setIsBoundingBoxModalOpen(false)}
