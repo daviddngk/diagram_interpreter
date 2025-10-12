@@ -51,7 +51,7 @@ const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidat
   // Use useMemo to avoid re-calculating the matches on every render.
   const matchedNodes = useMemo(() => {
     return nodes.map(node => {
-      const contextMatch = node.matchedEquipment || node.matched_equipment || null;
+      const contextMatch = node.matchedEquipment || null;
 
       let resolvedMatch = contextMatch || null;
       if (resolvedMatch && Array.isArray(equipmentLibrary) && equipmentLibrary.length > 0) {
@@ -103,11 +103,30 @@ const BoundingBoxModal = ({ isOpen, onClose, imageUrl, onCaptureData, consolidat
     setDrawingNodeId(prevId => (prevId === nodeId ? null : nodeId));
   };
 
+  const sanitizeMatchedEquipment = (matchedEquipment) => {
+    if (!matchedEquipment || typeof matchedEquipment !== 'object') {
+      return null;
+    }
+    const id = matchedEquipment.id ?? matchedEquipment.equipment_id ?? null;
+    const name = matchedEquipment.name ?? matchedEquipment.label ?? null;
+    if (id === null && !name) {
+      return null;
+    }
+    return { id, name };
+  };
+
   const handleCapture = () => {
     if (onCaptureData) {
-      // Capture the enriched node data, which now includes bounding boxes and port locations.
-      // This will overwrite any previous 'nodes' data in the consolidated context.
-      onCaptureData('nodes', nodesForDisplay);
+      const sanitizedNodes = nodesForDisplay.map(node => {
+        const clone = JSON.parse(JSON.stringify(node));
+        if ('matched_equipment' in clone) {
+          delete clone.matched_equipment;
+        }
+        clone.matchedEquipment = sanitizeMatchedEquipment(node.matchedEquipment);
+        return clone;
+      });
+
+      onCaptureData('nodes', sanitizedNodes);
       onClose(); // Close the modal after capturing.
     }
   };

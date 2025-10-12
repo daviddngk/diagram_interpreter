@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import copy
 import difflib
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any, Optional
@@ -125,6 +126,97 @@ def _normalize_nodes(nodes: Optional[Any]) -> List[Dict[str, Any]]:
     return []
 
 
+def _simplify_equipment(equipment: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(equipment, dict):
+        eq_id = equipment.get('id')
+        if eq_id is None and equipment.get('equipment_id') is not None:
+            eq_id = equipment.get('equipment_id')
+        name = equipment.get('name') or equipment.get('label')
+        if eq_id is None and not name:
+            return None
+        return {"id": eq_id, "name": name}
+    if isinstance(equipment, str):
+        if not equipment.strip():
+            return None
+        return {"id": None, "name": equipment}
+    return None
+
+
+def _find_equipment_record(
+    equipment_library: Optional[List[Dict[str, Any]]],
+    equipment: Any,
+) -> Optional[Dict[str, Any]]:
+    if not equipment_library or not equipment:
+        return None
+
+    eq_id: Optional[Any] = None
+    name: Optional[str] = None
+
+    if isinstance(equipment, dict):
+        eq_id = equipment.get('id') or equipment.get('equipment_id')
+        name = equipment.get('name') or equipment.get('label')
+    elif isinstance(equipment, str):
+        name = equipment
+
+    if eq_id is not None:
+        try:
+            eq_id_int = int(eq_id)
+        except (TypeError, ValueError):
+            eq_id_int = eq_id
+        for record in equipment_library:
+            if not isinstance(record, dict):
+                continue
+            if record.get('id') == eq_id_int:
+                return record
+
+    if name:
+        lower_name = name.lower()
+        for record in equipment_library:
+            record_name = record.get('name') if isinstance(record, dict) else None
+            if isinstance(record_name, str) and record_name.lower() == lower_name:
+                return record
+    return None
+
+
+def _build_ports_from_record(
+    ports_data: Any,
+    bbox: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    ports: List[Dict[str, Any]] = []
+    if not isinstance(ports_data, list):
+        return ports
+
+    base_x = bbox.get('x', 0)
+    base_y = bbox.get('y', 0)
+    width = bbox.get('width') or 0
+    height = bbox.get('height') or 0
+    if width == 0 or height == 0:
+        return ports
+
+    for port in ports_data:
+        if not isinstance(port, dict):
+            continue
+        try:
+            rel_x = float(port.get('coordinate_x'))
+            rel_y = float(port.get('coordinate_y'))
+        except (TypeError, ValueError):
+            continue
+        absolute_x = base_x + rel_x * width
+        absolute_y = base_y + rel_y * height
+        ports.append({
+            "id": port.get('id'),
+            "label": port.get('label'),
+            "type": port.get('type'),
+            "direction": port.get('direction'),
+            "rate": port.get('rate'),
+            "location": {
+                "absolute": {"x": float(absolute_x), "y": float(absolute_y)},
+                "relative": {"x": float(rel_x), "y": float(rel_y)},
+            },
+        })
+    return ports
+
+
 def _tokenize(text: str) -> List[str]:
     base_tokens = [token for token in re.split(r'[^a-z0-9]+', text.lower()) if token]
     if not base_tokens:
@@ -169,6 +261,7 @@ def run_bounding_box_pipeline(
 ) -> Dict[str, Any]:
     """Run the automatic bounding box pipeline and return step imagery plus nodes."""
     original = _load_image(image_path)
+    image_height, image_width = original.shape[:2]
 
     steps: List[Dict[str, str]] = []
     debug_messages: List[str] = []
@@ -350,14 +443,15 @@ def run_bounding_box_pipeline(
                 f"Node '{label}' could not be aligned with OCR text (best_score={best_score:.2f})"
             )
 
-    enriched_nodes = list(remaining_existing)
-    remaining_existing = list(enriched_nodes)
-
-    matched_nodes = []
+    matched_nodes: List[Dict[str, Any]] = []
+    remaining_existing = list(remaining_existing)
 
     for idx, box in enumerate(boxes, start=1):
-        label = f"Auto Node {idx}"
-        matched_equipment = None
+        default_label = f"Auto Node {idx}"
+        matched_equipment: Any = None
+        matched_ports: List[Dict[str, Any]] = []
+        node_id: Optional[Any] = None
+        assigned_node: Optional[Dict[str, Any]] = None
 
         if remaining_existing:
             bx, by = _center(box)
@@ -375,12 +469,19 @@ def run_bounding_box_pipeline(
                 return (cx - bx) ** 2 + (cy - by) ** 2
 
             best_node = min(remaining_existing, key=score)
+            assigned_node = best_node
+            remaining_existing = [n for n in remaining_existing if n is not best_node]
+
+            matched_equipment = best_node.get('matchedEquipment')
+            if matched_equipment is None and best_node.get('matched_equipment'):
+                matched_equipment = best_node.get('matched_equipment')
+            node_id = best_node.get('id', node_id)
+            default_label = best_node.get('label') or default_label
+            if best_node.get('ports'):
+                matched_ports = copy.deepcopy(best_node.get('ports', []))
 
             node_bbox = best_node.get('bbox')
             if not node_bbox or any(node_bbox.get(key) is None for key in ('x', 'y', 'width', 'height')):
-                label = best_node.get('label') or label
-                matched_equipment = best_node.get('matchedEquipment')
-                remaining_existing = [n for n in remaining_existing if n is not best_node]
                 debug_messages.append(
                     f"Box {idx}: nearest node '{best_node.get('label')}' missing bbox data; assigning label fallback"
                 )
@@ -396,16 +497,10 @@ def run_bounding_box_pipeline(
                 threshold = (box["width"] ** 2 + box["height"] ** 2) ** 0.5 * 0.75
 
                 if distance <= threshold:
-                    label = best_node.get('label') or label
-                    matched_equipment = best_node.get('matchedEquipment')
-                    remaining_existing = [n for n in remaining_existing if n is not best_node]
                     debug_messages.append(
-                        f"Box {idx}: matched to existing node '{label}' (distance={distance:.1f}, threshold={threshold:.1f})"
+                        f"Box {idx}: matched to existing node '{default_label}' (distance={distance:.1f}, threshold={threshold:.1f})"
                     )
                 else:
-                    label = best_node.get('label') or label
-                    matched_equipment = best_node.get('matchedEquipment')
-                    remaining_existing = [n for n in remaining_existing if n is not best_node]
                     debug_messages.append(
                         f"Box {idx}: nearest existing node '{best_node.get('label')}' too far (distance={distance:.1f}, threshold={threshold:.1f}); assigning fallback label"
                     )
@@ -413,23 +508,59 @@ def run_bounding_box_pipeline(
             debug_messages.append(f"Box {idx}: no existing nodes available for matching")
 
         if matched_equipment is None:
-            debug_messages.append(f"Box {idx}: equipment match not provided (label='{label}')")
+            debug_messages.append(f"Box {idx}: equipment match not provided (label='{default_label}')")
 
-        matched_nodes.append({
-            "id": idx,
-            "label": label,
-            "bbox": {
-                "x": box["x"],
-                "y": box["y"],
-                "width": box["width"],
-                "height": box["height"],
+        bbox_payload = {
+            "x": int(box["x"]),
+            "y": int(box["y"]),
+            "width": int(box["width"]),
+            "height": int(box["height"]),
+        }
+        center_x = bbox_payload["x"] + bbox_payload["width"] / 2.0
+        center_y = bbox_payload["y"] + bbox_payload["height"] / 2.0
+        location_payload = {
+            "absolute": {
+                "x": float(center_x),
+                "y": float(center_y),
             },
-            "matchedEquipment": matched_equipment,
-            "ports": [],
+            "relative": {
+                "x": float(center_x / image_width) if image_width else 0.0,
+                "y": float(center_y / image_height) if image_height else 0.0,
+            },
+        }
+        resolved_equipment = matched_equipment
+        library_record = _find_equipment_record(equipment_library, resolved_equipment)
+        if isinstance(resolved_equipment, str) and equipment_library:
+            lower_name = resolved_equipment.lower()
+            for record in equipment_library:
+                record_name = record.get('name')
+                if isinstance(record_name, str) and record_name.lower() == lower_name:
+                    resolved_equipment = record
+                    break
+
+        simplified_equipment = _simplify_equipment(resolved_equipment)
+        if library_record is None:
+            library_record = _find_equipment_record(equipment_library, simplified_equipment)
+
+        if not matched_ports and library_record:
+            matched_ports = _build_ports_from_record(library_record.get('ports'), bbox_payload)
+
+        node_payload = dict(assigned_node) if isinstance(assigned_node, dict) else {}
+        if 'matched_equipment' in node_payload:
+            node_payload.pop('matched_equipment', None)
+        node_payload.update({
+            "id": node_id if node_id is not None else idx,
+            "label": default_label,
+            "bbox": bbox_payload,
+            "location": location_payload,
+            "matchedEquipment": simplified_equipment,
+            "ports": matched_ports,
         })
 
+        matched_nodes.append(node_payload)
+
     matched_count = sum(1 for node in matched_nodes if node.get('matchedEquipment'))
-    nodes_with_bbox = sum(1 for node in enriched_nodes if isinstance(node.get('bbox'), dict))
+    nodes_with_bbox = sum(1 for node in matched_nodes if isinstance(node.get('bbox'), dict))
     summary = {
         "detected_nodes": len(matched_nodes),
         "matched_equipment": matched_count,
