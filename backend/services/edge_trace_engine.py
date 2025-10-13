@@ -54,7 +54,11 @@ def _process_step_2_contour_outline(blue_mask):
     """
     # Find all contours in the initial mask.
     # A copy is used as findContours can modify the source image.
-    contours, _ = cv2.findContours(blue_mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        blue_mask.copy(),
+        cv2.RETR_LIST,  # RETR_LIST keeps nested contours so interior traces aren't dropped
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
 
     # Prepare a new black mask to hold the cleaned-up result.
     clean_mask = np.zeros_like(blue_mask)
