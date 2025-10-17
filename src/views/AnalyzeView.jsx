@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AnalysisPanel from '../components/AnalysisPanel';
 import JsonEditor from '../components/JsonEditor';
 import { useAnalysis } from './AnalysisContext';
@@ -28,6 +28,117 @@ const AnalyzeView = () => {
 
   // Consume the equipment library context to get the list of equipment
   const { equipmentList } = useEquipmentLibrary();
+
+  const imageRef = useRef(null);
+  const [imageMetrics, setImageMetrics] = useState({ naturalWidth: 0, naturalHeight: 0 });
+  const [showCoords, setShowCoords] = useState(false);
+  const [mouseCoords, setMouseCoords] = useState(null);
+  const [highlightEnabled, setHighlightEnabled] = useState(false);
+  const [selectedConnectionId, setSelectedConnectionId] = useState('');
+
+  const toggleCoordinateMode = () => {
+    setShowCoords((prev) => {
+      const next = !prev;
+      if (!next) {
+        setMouseCoords(null);
+      }
+      return next;
+    });
+  };
+
+  const handleMouseMove = (event) => {
+    if (!showCoords || !imageRef.current) {
+      return;
+    }
+
+    const bounds = imageRef.current.getBoundingClientRect();
+    const naturalWidth = imageRef.current.naturalWidth || bounds.width;
+    const naturalHeight = imageRef.current.naturalHeight || bounds.height;
+
+    if (!bounds.width || !bounds.height) {
+      return;
+    }
+
+    const scaleX = naturalWidth / bounds.width;
+    const scaleY = naturalHeight / bounds.height;
+    const relativeX = (event.clientX - bounds.left) * scaleX;
+    const relativeY = (event.clientY - bounds.top) * scaleY;
+
+    const clampedX = Math.max(0, Math.min(naturalWidth, Math.round(relativeX)));
+    const clampedY = Math.max(0, Math.min(naturalHeight, Math.round(relativeY)));
+
+    setMouseCoords({ x: clampedX, y: clampedY });
+  };
+
+  const handleMouseLeave = () => {
+    if (showCoords) {
+      setMouseCoords(null);
+    }
+  };
+
+  const handleImageLoad = (event) => {
+    const { naturalWidth, naturalHeight } = event.currentTarget;
+    setImageMetrics({ naturalWidth, naturalHeight });
+  };
+
+  const edgeTraceData = consolidatedData?.edge_trace_cv;
+  const highlightableConnections = useMemo(() => {
+    if (!edgeTraceData || !Array.isArray(edgeTraceData.connections)) {
+      return [];
+    }
+    return edgeTraceData.connections.filter(
+      (conn) => Array.isArray(conn.path) && conn.path.length > 1
+    );
+  }, [edgeTraceData]);
+
+  useEffect(() => {
+    if (!highlightEnabled) {
+      setSelectedConnectionId('');
+      return;
+    }
+
+    if (highlightableConnections.length === 0) {
+      setHighlightEnabled(false);
+      setSelectedConnectionId('');
+      return;
+    }
+
+    const hasCurrentSelection = highlightableConnections.some(
+      (conn) => String(conn.id) === String(selectedConnectionId)
+    );
+    if (!hasCurrentSelection) {
+      setSelectedConnectionId(String(highlightableConnections[0].id));
+    }
+  }, [highlightEnabled, highlightableConnections, selectedConnectionId]);
+
+  const selectedConnection = useMemo(() => {
+    if (!highlightEnabled) {
+      return null;
+    }
+    return highlightableConnections.find(
+      (conn) => String(conn.id) === String(selectedConnectionId)
+    );
+  }, [highlightEnabled, highlightableConnections, selectedConnectionId]);
+
+  const highlightPolyline = useMemo(() => {
+    if (!selectedConnection || !Array.isArray(selectedConnection.path)) {
+      return '';
+    }
+    return selectedConnection.path.map((pt) => `${pt.x},${pt.y}`).join(' ');
+  }, [selectedConnection]);
+
+  useEffect(() => {
+    if (highlightEnabled && highlightableConnections.length === 0) {
+      setHighlightEnabled(false);
+    }
+  }, [highlightEnabled, highlightableConnections]);
+
+  const toggleHighlight = () => {
+    if (!highlightableConnections.length) {
+      return;
+    }
+    setHighlightEnabled((prev) => !prev);
+  };
 
   const handleRequestEditConsolidatedJson = () => {
     if (Object.keys(consolidatedData).length > 1 || consolidatedData.diagramIQ_metadata?.gcsImageUrl) {
@@ -70,11 +181,110 @@ const AnalyzeView = () => {
           {imagePreviewSrc && (
             <div className="border rounded-lg p-2 bg-gray-50 shadow-sm">
               <h2 className="text-lg font-semibold mb-2 text-gray-700">Image Preview</h2>
-              <img
-                src={imagePreviewSrc}
-                alt="Preview"
-                className="max-h-[70vh] w-auto mx-auto rounded"
-              />
+              <div className="relative flex justify-center">
+                <img
+                  ref={imageRef}
+                  src={imagePreviewSrc}
+                  alt="Preview"
+                  className="max-h-[70vh] w-auto rounded"
+                  onLoad={handleImageLoad}
+                  onMouseMove={handleMouseMove}
+                  onMouseLeave={handleMouseLeave}
+                />
+                {highlightEnabled && highlightPolyline && imageMetrics.naturalWidth > 0 && imageMetrics.naturalHeight > 0 && (
+                  <div className="absolute inset-0 pointer-events-none flex justify-center">
+                    <svg
+                      className="w-full h-full"
+                      viewBox={`0 0 ${imageMetrics.naturalWidth} ${imageMetrics.naturalHeight}`}
+                      preserveAspectRatio="xMidYMid meet"
+                    >
+                      <polyline
+                        points={highlightPolyline}
+                        fill="none"
+                        stroke="#ef4444"
+                        strokeWidth={Math.max(2, imageMetrics.naturalWidth / 800)}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {selectedConnection?.path?.length ? (
+                        <>
+                          <circle
+                            cx={selectedConnection.path[0].x}
+                            cy={selectedConnection.path[0].y}
+                            r={Math.max(4, imageMetrics.naturalWidth / 400)}
+                            fill="#22c55e"
+                            stroke="#14532d"
+                            strokeWidth={1}
+                          />
+                          <circle
+                            cx={selectedConnection.path[selectedConnection.path.length - 1].x}
+                            cy={selectedConnection.path[selectedConnection.path.length - 1].y}
+                            r={Math.max(4, imageMetrics.naturalWidth / 400)}
+                            fill="#f97316"
+                            stroke="#7c2d12"
+                            strokeWidth={1}
+                          />
+                        </>
+                      ) : null}
+                    </svg>
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleCoordinateMode}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      showCoords ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    x/y
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleHighlight}
+                    disabled={!highlightableConnections.length}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      highlightEnabled
+                        ? 'bg-purple-600 text-white hover:bg-purple-700'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    } ${!highlightableConnections.length ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    Highlight
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  {highlightEnabled && (
+                    highlightableConnections.length ? (
+                      <>
+                        <label className="text-xs font-medium text-gray-600" htmlFor="highlight-connection-select">
+                          Connection
+                        </label>
+                        <select
+                          id="highlight-connection-select"
+                          value={selectedConnectionId}
+                          onChange={(event) => setSelectedConnectionId(event.target.value)}
+                          className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          {highlightableConnections.map((conn) => (
+                            <option key={conn.id} value={String(conn.id)}>
+                              #{conn.id} · {conn.path_length ? `${conn.path_length} px` : `${conn.path.length} pts`}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-500">No traced connections available.</span>
+                    )
+                  )}
+                  {showCoords && (
+                    <div className="ml-3 min-w-[140px] rounded border border-gray-300 bg-gray-100 px-3 py-1 text-sm font-mono text-gray-800 text-right">
+                      X: {mouseCoords ? mouseCoords.x : '--'} , Y: {mouseCoords ? mouseCoords.y : '--'}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
           {!imagePreviewSrc && (

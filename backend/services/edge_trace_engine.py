@@ -271,6 +271,27 @@ def _walk_connection_path(start_pt, skeleton_mask, pixel_degree, visited, radius
 
 # ********************************************************************************************
 
+def _downsample_path(path, max_points=500):
+    """
+    Convert a list of (y, x) pixels into a simplified polyline capped at max_points.
+    """
+    if not path:
+        return []
+
+    total = len(path)
+    if total <= max_points:
+        sampled = list(path)
+    else:
+        step = max(1, total // max_points)
+        sampled = [path[i] for i in range(0, total, step)]
+        if sampled[-1] != path[-1]:
+            sampled.append(path[-1])
+
+    polyline = [{"x": int(pt[1]), "y": int(pt[0])} for pt in sampled]
+
+    return polyline
+
+
 def _process_step_5_generate_output(step_data):
     """
     Walks all paths from endpoints to generate the final JSON output.
@@ -300,7 +321,9 @@ def _process_step_5_generate_output(step_data):
             connection_records.append({
                 "id": len(connection_records) + 1,
                 "start_node": start_node,
-                "end_node": end_node
+                "end_node": end_node,
+                "path": _downsample_path(path),
+                "path_length": len(path),
             })
             # IMPORTANT: Mark all nodes in the found path as visited.
             # This prevents us from starting a new walk from the other end of this same path.
